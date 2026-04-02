@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { useAlert } from '@/template';
-import { colors, typography, spacing, borderRadius } from '../../constants/theme';
+import { colors, typography, spacing, borderRadius, shadows } from '../../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { UserRole } from '../../services/authService';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<UserRole>('staff');
   const router = useRouter();
   const { login } = useAuth();
   const { showAlert } = useAlert();
@@ -43,91 +44,127 @@ export default function LoginScreen() {
           router.replace('/auth/login');
       }
     } catch (error) {
+      console.error('Login error:', error);
       showAlert('Login Failed', 'Invalid email or password. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  const roles: { value: UserRole; label: string; icon: keyof typeof MaterialIcons.glyphMap }[] = [
+    { value: 'admin', label: 'Admin', icon: 'security' },
+    { value: 'dean', label: 'Dean', icon: 'account-balance' },
+    { value: 'staff', label: 'Advisor', icon: 'groups' },
+  ];
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <LinearGradient
-        colors={['#4F46E5', '#7C3AED']}
-        style={styles.header}
-      >
-        <View style={[styles.headerContent, { paddingTop: insets.top + spacing.lg }]}>
-          <View style={styles.logoContainer}>
-            <MaterialIcons name="school" size={48} color="#FFFFFF" />
-          </View>
-          <Text style={styles.headerTitle}>Smart Attendance</Text>
-          <Text style={styles.headerSubtitle}>Student Management System</Text>
-        </View>
-      </LinearGradient>
-
       <ScrollView 
-        style={styles.content} 
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + spacing.xl }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.form}>
-          <Text style={styles.formTitle}>Welcome Back</Text>
-          <Text style={styles.formSubtitle}>Sign in to continue</Text>
+        <View style={styles.header}>
+          <View style={styles.iconBox}>
+            <MaterialIcons name="school" size={40} color={colors.primaryBlue} />
+          </View>
+          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.subtitle}>Select your role to access the attendance dashboard</Text>
+        </View>
 
-          <Text style={styles.label}>Email Address</Text>
-          <View style={styles.inputContainer}>
-            <MaterialIcons name="email" size={20} color={colors.textSecondary} style={styles.inputIcon} />
+        <View style={styles.form}>
+          <Text style={styles.sectionLabel}>STAFF ROLE</Text>
+          <View style={styles.roleSelector}>
+            {roles.map((role) => {
+              const isActive = selectedRole === role.value;
+              return (
+                <Pressable
+                  key={role.value}
+                  onPress={() => setSelectedRole(role.value)}
+                  style={[
+                    styles.roleItem,
+                    isActive && styles.roleItemActive,
+                  ]}
+                >
+                  <MaterialIcons 
+                    name={role.icon} 
+                    size={22} 
+                    color={isActive ? colors.primaryBlue : colors.textSecondary} 
+                  />
+                  <Text style={[
+                    styles.roleText,
+                    isActive && styles.roleTextActive
+                  ]}>
+                    {role.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={styles.inputLabel}>Institutional Email</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="at-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Enter your email"
+              placeholder="name@college.edu"
+              placeholderTextColor={colors.textTertiary}
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
               keyboardType="email-address"
-              placeholderTextColor={colors.textTertiary}
             />
           </View>
 
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.inputContainer}>
-            <MaterialIcons name="lock" size={20} color={colors.textSecondary} style={styles.inputIcon} />
+          <View style={styles.passwordHeader}>
+            <Text style={styles.inputLabel}>Password</Text>
+            <Pressable>
+              <Text style={styles.forgotText}>Forgot Password?</Text>
+            </Pressable>
+          </View>
+          <View style={styles.inputWrapper}>
+            <MaterialIcons name="lock-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Enter your password"
+              placeholder="••••••••"
+              placeholderTextColor={colors.textTertiary}
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
-              placeholderTextColor={colors.textTertiary}
             />
-            <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+            <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.rightIcon}>
               <MaterialIcons 
                 name={showPassword ? 'visibility' : 'visibility-off'} 
                 size={20} 
-                color={colors.textSecondary} 
+                color={colors.textTertiary} 
               />
             </Pressable>
           </View>
 
-          <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
+          <Pressable 
+            style={({ pressed }) => [
+              styles.submitButton,
+              shadows.md,
+              pressed && styles.buttonPressed,
+              loading && styles.buttonDisabled
+            ]}
             onPress={handleLogin}
             disabled={loading}
           >
-            <LinearGradient
-              colors={['#4F46E5', '#7C3AED']}
-              style={styles.buttonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Text style={styles.buttonText}>{loading ? 'Logging in...' : 'Login'}</Text>
-            </LinearGradient>
+            <Text style={styles.submitButtonText}>
+              {loading ? 'Signing in...' : 'Sign In to Dashboard'}
+            </Text>
+            <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" style={styles.arrowIcon} />
           </Pressable>
 
-          <Pressable onPress={() => router.push('/auth/signup')} style={styles.linkButton}>
-            <Text style={styles.linkText}>Don't have an account? <Text style={styles.linkTextBold}>Sign Up</Text></Text>
-          </Pressable>
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>New to the platform? </Text>
+            <Pressable onPress={() => router.push('/auth/signup')}>
+              <Text style={styles.footerLink}>Create an Account</Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -139,126 +176,150 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingBottom: spacing.xl,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-  },
-  headerContent: {
-    alignItems: 'center',
+  scrollContent: {
     paddingHorizontal: spacing.lg,
-  },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  headerTitle: {
-    ...typography.h1,
-    fontSize: 28,
-    color: '#FFFFFF',
-  },
-  headerSubtitle: {
-    ...typography.caption,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: spacing.xs,
-    letterSpacing: 1,
-  },
-  content: {
-    flex: 1,
-  },
-  contentContainer: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
     paddingBottom: spacing.xxl,
   },
-  form: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xl,
-    marginTop: -40,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.1,
-        shadowRadius: 10,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
+  header: {
+    alignItems: 'center',
+    marginBottom: spacing.xxl,
   },
-  formTitle: {
-    ...typography.h2,
+  iconBox: {
+    width: 80,
+    height: 80,
+    backgroundColor: '#eff6ff',
+    borderRadius: borderRadius.lg,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  title: {
+    ...typography.h1,
     color: colors.textPrimary,
     textAlign: 'center',
+    marginBottom: spacing.xs,
   },
-  formSubtitle: {
-    ...typography.caption,
+  subtitle: {
+    ...typography.body,
     color: colors.textSecondary,
     textAlign: 'center',
-    marginBottom: spacing.xl,
+    paddingHorizontal: spacing.md,
   },
-  label: {
+  form: {
+    width: '100%',
+  },
+  sectionLabel: {
     ...typography.label,
     color: colors.textPrimary,
-    marginBottom: spacing.xs,
-    marginTop: spacing.md,
+    letterSpacing: 1.5,
+    marginBottom: spacing.sm,
+    fontSize: 12,
   },
-  inputContainer: {
+  roleSelector: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.xs,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  roleItem: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.sm,
+    gap: spacing.xs,
+  },
+  roleItemActive: {
+    backgroundColor: colors.pureWhite,
+    ...shadows.sm,
+  },
+  roleText: {
+    ...typography.label,
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  roleTextActive: {
+    color: colors.primaryBlue,
+    fontWeight: '700',
+  },
+  inputLabel: {
+    ...typography.label,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceSecondary,
     borderRadius: borderRadius.md,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
+    marginBottom: spacing.lg,
+    paddingHorizontal: spacing.md,
   },
   inputIcon: {
-    marginLeft: spacing.md,
+    marginRight: spacing.sm,
   },
   input: {
     flex: 1,
     ...typography.body,
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
     color: colors.textPrimary,
   },
-  eyeIcon: {
-    padding: spacing.md,
+  passwordHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  button: {
-    marginTop: spacing.xl,
+  forgotText: {
+    ...typography.label,
+    color: colors.primaryBlue,
+    fontSize: 12,
+  },
+  rightIcon: {
+    padding: spacing.xs,
+  },
+  submitButton: {
+    backgroundColor: colors.primaryBlue,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
     borderRadius: borderRadius.md,
-    overflow: 'hidden',
+    marginTop: spacing.lg,
+  },
+  submitButtonText: {
+    ...typography.h3,
+    color: '#FFFFFF',
+    fontSize: 18,
+  },
+  arrowIcon: {
+    marginLeft: spacing.sm,
+  },
+  buttonPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.98 }],
   },
   buttonDisabled: {
     opacity: 0.6,
   },
-  buttonGradient: {
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  buttonText: {
-    ...typography.bodyMedium,
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  linkButton: {
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     marginTop: spacing.xl,
-    alignItems: 'center',
   },
-  linkText: {
+  footerText: {
     ...typography.body,
     color: colors.textSecondary,
     fontSize: 14,
   },
-  linkTextBold: {
-    color: '#4F46E5',
-    fontWeight: '700',
+  footerLink: {
+    ...typography.bodySemibold,
+    color: colors.primaryBlue,
+    fontSize: 14,
   },
 });

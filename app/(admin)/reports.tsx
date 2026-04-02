@@ -11,6 +11,7 @@ export default function AdminReports() {
   const [loading, setLoading] = useState(true);
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [stats, setStats] = useState<any>(null);
+  const [attendanceLogs, setAttendanceLogs] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -18,17 +19,31 @@ export default function AdminReports() {
 
   const loadData = async () => {
     try {
-      const [classData, statsData] = await Promise.all([
+      const [classData, statsData, logsData] = await Promise.all([
         dataService.getClasses(),
         dataService.getStatistics(),
+        dataService.getAttendanceLogs(),
       ]);
       setClasses(classData);
       setStats(statsData);
+      setAttendanceLogs(logsData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const formatDate = (dateString: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    if (dateString === today) return 'Today';
+    
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
   };
 
   if (loading) {
@@ -51,7 +66,7 @@ export default function AdminReports() {
 
       <ScrollView 
         style={styles.content}
-        contentContainerStyle={{ paddingBottom: spacing.xl }}
+        contentContainerStyle={{ paddingBottom: spacing.xxl }}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.sectionTitle}>Overall Statistics</Text>
@@ -78,7 +93,54 @@ export default function AdminReports() {
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Class-wise Analysis</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Daily Attendance Logs</Text>
+          <View style={styles.badgeCount}>
+            <Text style={styles.badgeText}>{attendanceLogs.length}</Text>
+          </View>
+        </View>
+
+        {attendanceLogs.length > 0 ? (
+          attendanceLogs.map((log) => (
+            <View key={log.id} style={styles.logCard}>
+              <View style={styles.logHeader}>
+                <View style={styles.logIndicator} />
+                <View style={styles.logClassInfo}>
+                  <Text style={styles.logClassName}>{log.className}</Text>
+                  <Text style={styles.logMeta}>{log.markedBy} • {formatDate(log.date)}</Text>
+                </View>
+                <View style={styles.logSessionBadge}>
+                  <Text style={styles.logSessionText}>Session</Text>
+                </View>
+              </View>
+              
+              <View style={styles.logStats}>
+                <View style={[styles.logStat, { backgroundColor: '#E1F8E1' }]}>
+                  <MaterialIcons name="check-circle" size={14} color={colors.success} />
+                  <Text style={[styles.logStatValue, { color: colors.success }]}>{log.present}</Text>
+                  <Text style={styles.logStatLabel}>Present</Text>
+                </View>
+                <View style={[styles.logStat, { backgroundColor: '#FEEEEE' }]}>
+                  <MaterialIcons name="cancel" size={14} color={colors.error} />
+                  <Text style={[styles.logStatValue, { color: colors.error }]}>{log.absent}</Text>
+                  <Text style={styles.logStatLabel}>Absent</Text>
+                </View>
+                <View style={[styles.logStat, { backgroundColor: '#FFF5E6' }]}>
+                  <MaterialIcons name="work" size={14} color={colors.warning} />
+                  <Text style={[styles.logStatValue, { color: colors.warning }]}>{log.onDuty}</Text>
+                  <Text style={styles.logStatLabel}>On Duty</Text>
+                </View>
+              </View>
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyContainer}>
+            <MaterialIcons name="history" size={40} color={colors.textTertiary} />
+            <Text style={styles.emptyText}>No attendance records found.</Text>
+          </View>
+        )}
+
+        <Text style={styles.sectionTitle}>Class-wise Performance</Text>
         {classes.map((classItem) => (
           <View key={classItem.id} style={[styles.classCard, shadows.sm]}>
             <View style={styles.classHeader}>
@@ -104,7 +166,7 @@ export default function AdminReports() {
 
             <View style={styles.attendanceBar}>
               <View style={styles.attendanceLabels}>
-                <Text style={styles.attendanceLabel}>Attendance Rate</Text>
+                <Text style={styles.attendanceLabel}>Overall Rate</Text>
                 <Text style={[styles.attendanceValue, { color: getAttendanceColor(classItem.attendanceRate) }]}>
                   {classItem.attendanceRate}%
                 </Text>
@@ -170,11 +232,28 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     marginTop: spacing.md,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  badgeCount: {
+    backgroundColor: colors.adminLight,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+  },
+  badgeText: {
+    ...typography.label,
+    fontSize: 10,
+    color: colors.admin,
+  },
   overallCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.md,
+    ...shadows.sm,
   },
   statRow: {
     flexDirection: 'row',
@@ -183,6 +262,7 @@ const styles = StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
+    flex: 1,
   },
   statValue: {
     ...typography.h1,
@@ -193,6 +273,86 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  logCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    ...shadows.sm,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.admin,
+  },
+  logHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  logIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.admin,
+    marginRight: spacing.sm,
+  },
+  logClassInfo: {
+    flex: 1,
+  },
+  logClassName: {
+    ...typography.h3,
+    fontSize: 15,
+    color: colors.textPrimary,
+  },
+  logMeta: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  logSessionBadge: {
+    backgroundColor: colors.surfaceSecondary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: borderRadius.sm,
+  },
+  logSessionText: {
+    ...typography.label,
+    fontSize: 10,
+    color: colors.textSecondary,
+  },
+  logStats: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  logStat: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    gap: 4,
+  },
+  logStatValue: {
+    ...typography.label,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  logStatLabel: {
+    ...typography.caption,
+    fontSize: 10,
+    color: colors.textSecondary,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    padding: spacing.xl,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: borderRadius.lg,
+    marginVertical: spacing.md,
+  },
+  emptyText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
   },
   classCard: {
     backgroundColor: colors.surface,

@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Platform, ScrollView, Modal, FlatList } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { useAlert } from '@/template';
 import { UserRole } from '../../services/authService';
-import { colors, typography, spacing, borderRadius } from '../../constants/theme';
+import { colors, typography, spacing, borderRadius, shadows } from '../../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SignupScreen() {
@@ -15,23 +14,27 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [selectedRole, setSelectedRole] = useState<UserRole>('staff');
   const [department, setDepartment] = useState('');
+  const [showDeptModal, setShowDeptModal] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
   const { signup } = useAuth();
   const { showAlert } = useAlert();
   const insets = useSafeAreaInsets();
 
   const departments = [
-    'CSE',
-    'ECE',
-    'MECH',
-    'CIVIL',
+    'Computer Science',
+    'Electronics & Communication',
+    'Mechanical Engineering',
+    'Civil Engineering',
+    'Information Technology',
+    'Electrical Engineering',
   ];
 
-  const roles: { value: UserRole; label: string; color: string; bgColor: string }[] = [
-    { value: 'admin', label: 'Office Admin', color: colors.admin, bgColor: colors.adminLight },
-    { value: 'dean', label: 'Dean', color: colors.dean, bgColor: colors.deanLight },
-    { value: 'staff', label: 'Staff', color: colors.staff, bgColor: colors.staffLight },
+  const roles: { value: UserRole; label: string; }[] = [
+    { value: 'admin', label: 'Office Admin' },
+    { value: 'dean', label: 'Dean' },
+    { value: 'staff', label: 'Advisor' },
   ];
 
   const handleSignup = async () => {
@@ -49,7 +52,6 @@ export default function SignupScreen() {
     try {
       await signup(email, password, name, selectedRole, department);
       
-      // Navigate based on selected role
       switch (selectedRole) {
         case 'admin':
           router.replace('/(admin)');
@@ -62,6 +64,7 @@ export default function SignupScreen() {
           break;
       }
     } catch (error) {
+      console.error('Signup error:', error);
       showAlert('Signup Failed', error instanceof Error ? error.message : 'Failed to create account');
     } finally {
       setLoading(false);
@@ -73,130 +76,180 @@ export default function SignupScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <LinearGradient
-        colors={['#6366F1', '#8B5CF6']}
-        style={styles.header}
+      <View style={[styles.navHeader, { paddingTop: insets.top }]}>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
+          <MaterialIcons name="chevron-left" size={32} color={colors.primaryBlue} />
+        </Pressable>
+        <Text style={styles.navTitle}>Account Registration</Text>
+        <View style={styles.backButtonPlaceholder} />
+      </View>
+
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.headerContent, { paddingTop: insets.top + spacing.lg }]}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
-          </Pressable>
-          <Text style={styles.headerTitle}>Create Account</Text>
-          <Text style={styles.headerSubtitle}>Join Smart Attendance System</Text>
-        </View>
-      </LinearGradient>
+        <Text style={styles.title}>Join our portal</Text>
+        <Text style={styles.subtitle}>
+          Select your role and enter details to get started with college attendance management.
+        </Text>
 
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.form}>
-          <Text style={styles.label}>Full Name</Text>
-          <View style={styles.inputContainer}>
-            <MaterialIcons name="person" size={20} color={colors.textSecondary} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your full name"
-              value={name}
-              onChangeText={setName}
-              placeholderTextColor={colors.textTertiary}
-            />
-          </View>
-
-          <Text style={styles.label}>Email Address</Text>
-          <View style={styles.inputContainer}>
-            <MaterialIcons name="email" size={20} color={colors.textSecondary} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your email"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              placeholderTextColor={colors.textTertiary}
-            />
-          </View>
-
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.inputContainer}>
-            <MaterialIcons name="lock" size={20} color={colors.textSecondary} style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your password"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              placeholderTextColor={colors.textTertiary}
-            />
-          </View>
-
-          <Text style={styles.label}>Select Role</Text>
-          <View style={styles.roleContainer}>
-            {roles.map((role) => (
-              <Pressable
-                key={role.value}
-                style={[
-                  styles.roleButton,
-                  selectedRole === role.value && { backgroundColor: role.bgColor, borderColor: role.color },
-                ]}
-                onPress={() => setSelectedRole(role.value)}
-              >
-                <Text
+          <Text style={styles.sectionLabel}>SELECT ROLE</Text>
+          <View style={styles.roleSelector}>
+            {roles.map((role) => {
+              const isActive = selectedRole === role.value;
+              return (
+                <Pressable
+                  key={role.value}
+                  onPress={() => setSelectedRole(role.value)}
                   style={[
-                    styles.roleButtonText,
-                    selectedRole === role.value && { color: role.color },
+                    styles.roleItem,
+                    isActive && styles.roleItemActive,
                   ]}
                 >
-                  {role.label}
-                </Text>
-              </Pressable>
-            ))}
+                  <Text style={[
+                    styles.roleText,
+                    isActive && styles.roleTextActive
+                  ]}>
+                    {role.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={styles.inputLabel}>Full Name</Text>
+          <View style={styles.inputWrapper}>
+            <MaterialIcons name="person-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Dr. Jane Smith"
+              placeholderTextColor={colors.textTertiary}
+              value={name}
+              onChangeText={setName}
+            />
           </View>
 
           {(selectedRole === 'dean' || selectedRole === 'staff') && (
             <>
-              <Text style={styles.label}>Department</Text>
-              <View style={styles.departmentContainer}>
-                {departments.map((dept) => (
-                  <Pressable
-                    key={dept}
-                    style={[
-                      styles.deptButton,
-                      department === dept && styles.deptButtonActive,
-                    ]}
-                    onPress={() => setDepartment(dept)}
-                  >
-                    <Text
-                      style={[
-                        styles.deptButtonText,
-                        department === dept && styles.deptButtonTextActive,
-                      ]}
-                    >
-                      {dept}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
+              <Text style={styles.inputLabel}>Department</Text>
+              <Pressable 
+                style={styles.inputWrapper} 
+                onPress={() => setShowDeptModal(true)}
+              >
+                <MaterialIcons name="account-balance" size={20} color={colors.textTertiary} style={styles.inputIcon} />
+                <Text style={[
+                  styles.input, 
+                  !department && { color: colors.textTertiary }
+                ]}>
+                  {department || "Choose your department"}
+                </Text>
+                <MaterialIcons name="expand-more" size={24} color={colors.textTertiary} />
+              </Pressable>
             </>
           )}
 
-          <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
+          <Text style={styles.inputLabel}>Institutional Email</Text>
+          <View style={styles.inputWrapper}>
+            <Ionicons name="at-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="jane.smith@college.edu"
+              placeholderTextColor={colors.textTertiary}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+          </View>
+
+          <Text style={styles.inputLabel}>Create Password</Text>
+          <View style={styles.inputWrapper}>
+            <MaterialIcons name="lock-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="••••••••••••"
+              placeholderTextColor={colors.textTertiary}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+            />
+            <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.rightIcon}>
+              <MaterialIcons 
+                name={showPassword ? 'visibility' : 'visibility-off'} 
+                size={20} 
+                color={colors.textTertiary} 
+              />
+            </Pressable>
+          </View>
+
+          <Pressable 
+            style={({ pressed }) => [
+              styles.submitButton,
+              shadows.md,
+              pressed && styles.buttonPressed,
+              loading && styles.buttonDisabled
+            ]}
             onPress={handleSignup}
             disabled={loading}
           >
-            <LinearGradient
-              colors={['#6366F1', '#8B5CF6']}
-              style={styles.buttonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Text style={styles.buttonText}>{loading ? 'Creating Account...' : 'Create Account'}</Text>
-            </LinearGradient>
+            <Text style={styles.submitButtonText}>
+              {loading ? 'Creating Account...' : 'Register Account'}
+            </Text>
+            <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" style={styles.arrowIcon} />
           </Pressable>
 
-          <Pressable onPress={() => router.back()} style={styles.linkButton}>
-            <Text style={styles.linkText}>Already have an account? Login</Text>
-          </Pressable>
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Already have an account? </Text>
+            <Pressable onPress={() => router.replace('/auth/login')}>
+              <Text style={styles.footerLink}>Sign In</Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
+
+      {/* Department Selection Modal */}
+      <Modal
+        visible={showDeptModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDeptModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Department</Text>
+              <Pressable onPress={() => setShowDeptModal(false)}>
+                <MaterialIcons name="close" size={24} color={colors.textPrimary} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={departments}
+              keyExtractor={(item) => item}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={styles.deptItem}
+                  onPress={() => {
+                    setDepartment(item);
+                    setShowDeptModal(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.deptItemText,
+                    department === item && styles.deptItemTextActive
+                  ]}>
+                    {item}
+                  </Text>
+                  {department === item && (
+                    <MaterialIcons name="check" size={20} color={colors.primaryBlue} />
+                  )}
+                </Pressable>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -206,132 +259,190 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingBottom: spacing.xxl,
-  },
-  headerContent: {
-    paddingHorizontal: spacing.lg,
+  navHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.md,
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
   },
   backButton: {
+    padding: spacing.xs,
+  },
+  navTitle: {
+    ...typography.label,
+    color: colors.textPrimary,
+    fontSize: 16,
+  },
+  backButtonPlaceholder: {
     width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  headerTitle: {
-    ...typography.h1,
-    fontSize: 28,
-    color: '#FFFFFF',
-  },
-  headerSubtitle: {
-    ...typography.caption,
-    color: 'rgba(255, 255, 255, 0.9)',
-    marginTop: spacing.xs,
   },
   content: {
     flex: 1,
   },
   contentContainer: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  title: {
+    ...typography.h1,
+    color: colors.textPrimary,
+    fontSize: 32,
+    marginBottom: spacing.sm,
+  },
+  subtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.xxl,
+    lineHeight: 22,
   },
   form: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    width: '100%',
   },
-  label: {
+  sectionLabel: {
+    ...typography.label,
+    color: colors.primaryBlue,
+    letterSpacing: 1.5,
+    marginBottom: spacing.sm,
+    fontSize: 12,
+  },
+  roleSelector: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: borderRadius.md,
+    padding: spacing.xs,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  roleItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.sm,
+  },
+  roleItemActive: {
+    backgroundColor: colors.pureWhite,
+    ...shadows.sm,
+  },
+  roleText: {
+    ...typography.label,
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  roleTextActive: {
+    color: colors.primaryBlue,
+    fontWeight: '700',
+  },
+  inputLabel: {
     ...typography.label,
     color: colors.textPrimary,
     marginBottom: spacing.sm,
-    marginTop: spacing.md,
   },
-  inputContainer: {
+  inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surfaceSecondary,
     borderRadius: borderRadius.md,
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: spacing.lg,
+    paddingHorizontal: spacing.md,
   },
   inputIcon: {
-    marginLeft: spacing.md,
+    marginRight: spacing.sm,
   },
   input: {
     flex: 1,
     ...typography.body,
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
     color: colors.textPrimary,
   },
-  roleContainer: {
-    gap: spacing.sm,
+  rightIcon: {
+    padding: spacing.xs,
   },
-  roleButton: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.md,
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-    alignItems: 'center',
-  },
-  roleButtonText: {
-    ...typography.bodyMedium,
-    color: colors.textSecondary,
-  },
-  departmentContainer: {
+  submitButton: {
+    backgroundColor: colors.primaryBlue,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-  },
-  deptButton: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-    marginBottom: spacing.xs,
-  },
-  deptButtonActive: {
-    backgroundColor: colors.admin,
-    borderColor: colors.admin,
-  },
-  deptButtonText: {
-    ...typography.small,
-    color: colors.textSecondary,
-  },
-  deptButtonTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  button: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+    borderRadius: borderRadius.xl,
     marginTop: spacing.lg,
-    borderRadius: borderRadius.md,
-    overflow: 'hidden',
+  },
+  submitButtonText: {
+    ...typography.h3,
+    color: '#FFFFFF',
+    fontSize: 18,
+  },
+  arrowIcon: {
+    marginLeft: spacing.sm,
+  },
+  buttonPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.98 }],
   },
   buttonDisabled: {
     opacity: 0.6,
   },
-  buttonGradient: {
-    paddingVertical: spacing.md,
-    alignItems: 'center',
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: spacing.xl,
   },
-  buttonText: {
-    ...typography.bodyMedium,
-    color: '#FFFFFF',
-  },
-  linkButton: {
-    marginTop: spacing.md,
-    alignItems: 'center',
-  },
-  linkText: {
+  footerText: {
     ...typography.body,
-    color: colors.admin,
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
+  footerLink: {
+    ...typography.bodySemibold,
+    color: colors.primaryBlue,
+    fontSize: 14,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.pureWhite,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    maxHeight: '60%',
+    paddingBottom: spacing.xxl,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  modalTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+  },
+  deptItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  deptItemText: {
+    ...typography.body,
+    color: colors.textPrimary,
+  },
+  deptItemTextActive: {
+    color: colors.primaryBlue,
+    fontWeight: '600',
   },
 });

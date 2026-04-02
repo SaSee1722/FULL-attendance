@@ -1,49 +1,45 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
-import { colors } from '../../constants/theme';
+import { Platform, View, StyleSheet } from 'react-native';
 
 export default function StaffLayout() {
   const insets = useSafeAreaInsets();
-
-  const tabBarStyle = {
-    height: Platform.select({
-      ios: insets.bottom + 60,
-      android: insets.bottom + 60,
-      default: 70,
-    }),
-    paddingTop: 8,
-    paddingBottom: Platform.select({
-      ios: insets.bottom + 8,
-      android: insets.bottom + 8,
-      default: 8,
-    }),
-    paddingHorizontal: 16,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  };
+  const bottomPad = Platform.OS === 'ios' ? insets.bottom : 0;
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle,
-        tabBarActiveTintColor: colors.staff,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
+        tabBarShowLabel: false,
+        tabBarStyle: {
+          height: 60 + bottomPad,
+          paddingBottom: bottomPad,
+          paddingTop: 0,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#E8EEFF',
+          shadowColor: '#4F46E5',
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          elevation: 16,
+        },
+        tabBarActiveTintColor: '#4F46E5',
+        tabBarInactiveTintColor: '#94A3B8',
+        tabBarIconStyle: {
+          marginTop: 4,
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Dashboard',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="dashboard" size={size} color={color} />
+          title: 'Home',
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[s.icon, focused && s.iconActive]}>
+              <MaterialIcons name="grid-view" size={24} color={color} />
+            </View>
           ),
         }}
       />
@@ -51,8 +47,25 @@ export default function StaffLayout() {
         name="attendance"
         options={{
           title: 'Attendance',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="fact-check" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[s.icon, focused && s.iconActive]}>
+              <Ionicons
+                name={focused ? 'school' : 'school-outline'}
+                size={24}
+                color={color}
+              />
+            </View>
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="reports"
+        options={{
+          title: 'Reports',
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[s.icon, focused && s.iconActive]}>
+              <MaterialIcons name="bar-chart" size={24} color={color} />
+            </View>
           ),
         }}
       />
@@ -60,11 +73,30 @@ export default function StaffLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="person" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[s.icon, focused && s.iconActive]}>
+              <MaterialIcons
+                name={focused ? 'person' : 'person-outline'}
+                size={24}
+                color={color}
+              />
+            </View>
           ),
         }}
       />
     </Tabs>
   );
 }
+
+const s = StyleSheet.create({
+  icon: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+  },
+  iconActive: {
+    backgroundColor: '#EEF2FF',
+  },
+});

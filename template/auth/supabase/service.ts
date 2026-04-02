@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { AuthUser, SendOTPOptions, SignUpResult, GoogleSignInResult } from '../types';
 import { safeSupabaseOperation, getSharedSupabaseClient } from '../../core/client';
-import { configManager } from '../../core/config';
 import { Platform } from 'react-native';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
@@ -115,8 +114,6 @@ export class AuthService {
       return this.mapSessionToAuthUser(session.user);
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown getCurrentUser error';
-      
       if (isAuthError(error)) {
         return null;
       }
@@ -214,7 +211,7 @@ export class AuthService {
               // Set flag to prevent deadlock
               isUpdatingUserInOTPFlow = true;
               
-              const { data: updateData, error: updateError } = await withTimeout(
+              const { error: updateError } = await withTimeout(
                 client.auth.updateUser({ password: options.password }),
                 TIMEOUT_CONFIG.USER_UPDATE,
                 'UpdateUser'
@@ -232,7 +229,7 @@ export class AuthService {
                 isUpdatingUserInOTPFlow = false;
               }, 2000);
               
-            } catch (updateError) {
+            } catch {
               // Clear flag on error
               isUpdatingUserInOTPFlow = false;
               // Continue with the authentication flow
@@ -261,9 +258,7 @@ export class AuthService {
               };
               return { user: fallbackUser };
             }
-          } catch (userError) {
-            const errorMessage = userError instanceof Error ? userError.message : 'Unknown error';
-            
+          } catch {
             // Use fallback data
             const fallbackUser: AuthUser = {
               id: data.user.id,

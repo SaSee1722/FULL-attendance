@@ -83,7 +83,7 @@ export const authService = {
 
     // Profile is now created by a trigger in Supabase (see supabase_schema.sql)
     // But we'll verify it or create it if the trigger failed/wasn't run
-    let { data: profile, error: profileError } = await supabase
+    let { data: profile } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', authData.user.id)

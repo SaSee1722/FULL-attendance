@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { authService, User, UserRole } from '../services/authService';
+import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -22,8 +23,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUser = async () => {
     try {
+      setLoading(true);
+      // Wait for Supabase to recover session first
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
       const currentUser = await authService.getCurrentUser();
-      setUser(currentUser);
+      if (authUser && currentUser) {
+        setUser(currentUser);
+      } else if (!authUser) {
+        // Session died or expired
+        setUser(null);
+      } else {
+        setUser(currentUser);
+      }
     } catch (error) {
       console.error('Failed to load user:', error);
     } finally {

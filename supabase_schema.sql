@@ -1,187 +1,205 @@
--- Drop existing tables (with CASCADE to handle dependencies)
-DROP TABLE IF EXISTS public.activity_logs CASCADE;
-DROP TABLE IF EXISTS public.attendance_records CASCADE;
-DROP TABLE IF EXISTS public.students CASCADE;
-DROP TABLE IF EXISTS public.classes CASCADE;
-DROP TABLE IF EXISTS public.profiles CASCADE;
-
--- Create profiles table
-CREATE TABLE public.profiles (
+-- Users profiles table
+CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-  email TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('admin', 'dean', 'staff')),
+  role TEXT CHECK (role IN ('dean', 'staff')) NOT NULL DEFAULT 'staff',
   department TEXT,
-  verified BOOLEAN DEFAULT true,
-  assigned_classes TEXT[] DEFAULT '{}',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create classes table
-CREATE TABLE public.classes (
-  id TEXT PRIMARY KEY,
+-- Classes table
+CREATE TABLE IF NOT EXISTS public.classes (
+  id TEXT PRIMARY KEY, -- e.g. CS-2024-A
   name TEXT NOT NULL,
   department TEXT NOT NULL,
   year TEXT NOT NULL,
   section TEXT NOT NULL,
   advisor TEXT NOT NULL,
   student_count INTEGER DEFAULT 0,
-  attendance_rate FLOAT DEFAULT 0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  attendance_rate FLOAT DEFAULT 100,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create students table
-CREATE TABLE public.students (
+-- Students table
+CREATE TABLE IF NOT EXISTS public.students (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT NOT NULL,
-  roll_no TEXT NOT NULL UNIQUE,
-  class_id TEXT REFERENCES public.classes(id) ON DELETE CASCADE,
-  attendance_rate FLOAT DEFAULT 0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  roll_no TEXT UNIQUE NOT NULL,
+  class_id TEXT REFERENCES public.classes(id) ON DELETE CASCADE NOT NULL,
+  attendance_rate FLOAT DEFAULT 100,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create attendance_records table
-CREATE TABLE public.attendance_records (
+-- Attendance records
+CREATE TABLE IF NOT EXISTS public.attendance_records (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  student_id UUID REFERENCES public.students(id) ON DELETE CASCADE,
-  class_id TEXT REFERENCES public.classes(id) ON DELETE CASCADE,
+  student_id UUID REFERENCES public.students(id) ON DELETE CASCADE NOT NULL,
+  class_id TEXT REFERENCES public.classes(id) ON DELETE CASCADE NOT NULL,
   date DATE NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('present', 'absent', 'on-duty', 'unapproved')),
-  marked_by UUID REFERENCES public.profiles(id),
-  timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  status TEXT CHECK (status IN ('present', 'absent', 'on-duty', 'unapproved')) NOT NULL,
+  marked_by UUID REFERENCES public.profiles(id) NOT NULL,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(student_id, date)
 );
 
--- Create activity_logs table
-CREATE TABLE public.activity_logs (
+-- Holidays table
+CREATE TABLE IF NOT EXISTS public.holidays (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  message TEXT NOT NULL,
-  department TEXT,
-  role TEXT,
-  timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  date DATE NOT NULL,
+  department TEXT NOT NULL,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(date, department)
 );
 
--- Enable Row Level Security (RLS)
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.classes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.attendance_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+-- Activity logs
+CREATE TABLE IF NOT EXISTS public.activity_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  type TEXT NOT NULL,
+  details TEXT NOT NULL,
+  department TEXT NOT NULL,
+  marked_by TEXT NOT NULL,
+  timestamp TIMESTAMPTZ DEFAULT NOW()
+);
 
--- Profiles Policies
+
+-- ── DROP EXISTING POLICIES ───────────────────
+DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Classes viewable by relevant department staff/dean" ON public.classes;
+DROP POLICY IF EXISTS "Deans can manage classes in their department" ON public.classes;
+DROP POLICY IF EXISTS "Students viewable by relevant staff/dean" ON public.students;
+DROP POLICY IF EXISTS "Deans can manage students" ON public.students;
+DROP POLICY IF EXISTS "Attendance records viewable by staff/dean" ON public.attendance_records;
+DROP POLICY IF EXISTS "Staff can mark attendance" ON public.attendance_records;
+DROP POLICY IF EXISTS "Holidays viewable by department" ON public.holidays;
+DROP POLICY IF EXISTS "Deans can manage holidays" ON public.holidays;
+DROP POLICY IF EXISTS "Activity logs viewable by department" ON public.activity_logs;
+
+-- Policies for Profiles
 CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
--- Classes Policies
-CREATE POLICY "Anyone can view classes" ON public.classes FOR SELECT USING (true);
-
-CREATE POLICY "Admins can manage all classes" ON public.classes FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+-- Policies for Classes
+CREATE POLICY "Classes viewable by relevant department staff/dean" 
+ON public.classes FOR SELECT 
+USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'dean' 
+  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
+  OR 
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'staff' 
+  AND (LOWER(advisor) = LOWER((SELECT name FROM public.profiles WHERE id = auth.uid())) OR LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid())))
 );
 
-CREATE POLICY "Deans can insert department classes" ON public.classes FOR INSERT WITH CHECK (
+CREATE POLICY "Deans can manage classes in their department" 
+ON public.classes FOR ALL 
+USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'dean' 
+  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
+);
+
+-- Policies for Students
+CREATE POLICY "Students viewable by relevant staff/dean" 
+ON public.students FOR SELECT 
+USING (
   EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() 
-    AND role = 'dean' AND department = classes.department
+    SELECT 1 FROM public.classes c
+    JOIN public.profiles p ON p.id = auth.uid()
+    WHERE c.id = students.class_id
+    AND (
+      (p.role = 'dean' AND LOWER(c.department) = LOWER(p.department)) 
+      OR (p.role = 'staff' AND LOWER(c.advisor) = LOWER(p.name))
+    )
   )
 );
 
-CREATE POLICY "Deans can update department classes" ON public.classes FOR UPDATE USING (
+CREATE POLICY "Deans can manage students" 
+ON public.students FOR ALL 
+USING (
   EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() 
-    AND role = 'dean' AND department = classes.department
+    SELECT 1 FROM public.classes c
+    JOIN public.profiles p ON p.id = auth.uid()
+    WHERE c.id = students.class_id
+    AND p.role = 'dean' AND LOWER(c.department) = LOWER(p.department)
   )
 );
 
-CREATE POLICY "Deans can delete department classes" ON public.classes FOR DELETE USING (
+-- Policies for Attendance
+CREATE POLICY "Attendance records viewable by staff/dean" 
+ON public.attendance_records FOR SELECT 
+USING (
   EXISTS (
-    SELECT 1 FROM public.profiles WHERE id = auth.uid() 
-    AND role = 'dean' AND department = classes.department
+    SELECT 1 FROM public.classes c
+    JOIN public.profiles p ON p.id = auth.uid()
+    WHERE c.id = attendance_records.class_id
+    AND (
+      (p.role = 'dean' AND LOWER(c.department) = LOWER(p.department)) 
+      OR (p.role = 'staff' AND LOWER(c.advisor) = LOWER(p.name))
+    )
   )
 );
 
--- Students Policies
-CREATE POLICY "Anyone can view students" ON public.students FOR SELECT USING (true);
-
-CREATE POLICY "Admins can insert students" ON public.students FOR INSERT WITH CHECK (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-);
-
-CREATE POLICY "Deans/Staff can insert department students" ON public.students FOR INSERT WITH CHECK (
+CREATE POLICY "Staff can mark attendance" 
+ON public.attendance_records FOR ALL 
+USING (
   EXISTS (
-    SELECT 1 FROM public.profiles p
-    WHERE p.id = auth.uid() 
-    AND (p.role = 'dean' OR p.role = 'staff') 
-    AND p.department = (SELECT department FROM public.classes WHERE id = class_id)
+    SELECT 1 FROM public.classes c
+    JOIN public.profiles p ON p.id = auth.uid()
+    WHERE c.id = attendance_records.class_id
+    AND (
+      (p.role = 'staff' AND LOWER(c.advisor) = LOWER(p.name))
+      OR (p.role = 'dean' AND LOWER(c.department) = LOWER(p.department))
+    )
   )
 );
 
-CREATE POLICY "Admins can update students" ON public.students FOR UPDATE USING (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+-- Policies for Holidays
+CREATE POLICY "Holidays viewable by department" 
+ON public.holidays FOR SELECT 
+USING (
+  LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
-CREATE POLICY "Deans/Staff can update department students" ON public.students FOR UPDATE USING (
-  EXISTS (
-    SELECT 1 FROM public.profiles p
-    WHERE p.id = auth.uid() 
-    AND (p.role = 'dean' OR p.role = 'staff') 
-    AND p.department = (SELECT department FROM public.classes WHERE id = students.class_id)
-  )
+CREATE POLICY "Deans can manage holidays" 
+ON public.holidays FOR ALL 
+USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'dean'
+  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
-CREATE POLICY "Admins can delete students" ON public.students FOR DELETE USING (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+-- Policies for Activity Logs
+CREATE POLICY "Activity logs viewable by department" 
+ON public.activity_logs FOR SELECT 
+USING (
+  LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
-CREATE POLICY "Deans/Staff can delete department students" ON public.students FOR DELETE USING (
-  EXISTS (
-    SELECT 1 FROM public.profiles p
-    WHERE p.id = auth.uid() 
-    AND (p.role = 'dean' OR p.role = 'staff') 
-    AND p.department = (SELECT department FROM public.classes WHERE id = students.class_id)
-  )
-);
+CREATE POLICY "Anyone can log activity" 
+ON public.activity_logs FOR INSERT 
+WITH CHECK (auth.uid() IS NOT NULL);
 
--- Attendance Policies
-CREATE POLICY "Attendance records are viewable by everyone" ON public.attendance_records FOR SELECT USING (true);
-CREATE POLICY "Staff can mark attendance" ON public.attendance_records FOR INSERT WITH CHECK (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND (role = 'staff' OR role = 'dean' OR role = 'admin'))
-);
 
--- Activity Logs Policies
-CREATE POLICY "Activity logs are viewable by department staff" ON public.activity_logs FOR SELECT USING (
-  EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND (role = 'admin' OR department = activity_logs.department))
-);
+-- ── TRIGGERS ──────────────────
+DROP TRIGGER IF EXISTS on_student_change ON public.students;
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS on_attendance_change ON public.attendance_records;
 
--- Trigger to update student_count in classes table
 CREATE OR REPLACE FUNCTION public.update_class_student_count()
 RETURNS TRIGGER AS $$
 BEGIN
   IF (TG_OP = 'INSERT') THEN
-    UPDATE public.classes
-    SET student_count = student_count + 1
-    WHERE id = NEW.class_id;
+    UPDATE public.classes SET student_count = student_count + 1 WHERE id = NEW.class_id;
   ELSIF (TG_OP = 'DELETE') THEN
-    UPDATE public.classes
-    SET student_count = GREATEST(0, student_count - 1)
-    WHERE id = OLD.class_id;
-  ELSIF (TG_OP = 'UPDATE' AND OLD.class_id IS DISTINCT FROM NEW.class_id) THEN
-    -- If class_id changed (rare but possible)
-    UPDATE public.classes
-    SET student_count = GREATEST(0, student_count - 1)
-    WHERE id = OLD.class_id;
-    UPDATE public.classes
-    SET student_count = student_count + 1
-    WHERE id = NEW.class_id;
+    UPDATE public.classes SET student_count = student_count - 1 WHERE id = OLD.class_id;
   END IF;
   RETURN NULL;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE TRIGGER on_student_change
-  AFTER INSERT OR UPDATE OR DELETE ON public.students
-  FOR EACH ROW EXECUTE FUNCTION public.update_class_student_count();
-
--- Function to handle new user signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -197,8 +215,54 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Trigger for new user signup
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+CREATE OR REPLACE FUNCTION public.update_attendance_rates()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_student_id UUID;
+  v_class_id TEXT;
+BEGIN
+  IF (TG_OP = 'DELETE') THEN
+    v_student_id := OLD.student_id;
+    v_class_id := OLD.class_id;
+  ELSE
+    v_student_id := NEW.student_id;
+    v_class_id := NEW.class_id;
+  END IF;
+
+  UPDATE public.students 
+  SET attendance_rate = (
+    WITH stats AS (
+      SELECT 
+        COUNT(*) FILTER (WHERE status = 'absent' OR status = 'unapproved') as absences,
+        MIN(date) FILTER (WHERE status = 'absent' OR status = 'unapproved') as first_abs_date
+      FROM public.attendance_records
+      WHERE student_id = v_student_id
+    ),
+    recoveries AS (
+      SELECT COUNT(*) as count
+      FROM public.attendance_records r, stats s
+      WHERE r.student_id = v_student_id
+      AND (r.status = 'present' OR r.status = 'on-duty')
+      AND r.date > s.first_abs_date
+    )
+    SELECT GREATEST(0, LEAST(100, 
+      100.0 - (COALESCE((SELECT absences FROM stats), 0) * 3.0) + (COALESCE((SELECT count FROM recoveries), 0) * 0.5)
+    ))
+  )
+  WHERE id = v_student_id;
+
+  UPDATE public.classes
+  SET attendance_rate = (
+    SELECT COALESCE(AVG(attendance_rate), 0)
+    FROM public.students
+    WHERE class_id = v_class_id
+  )
+  WHERE id = v_class_id;
+
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_student_change AFTER INSERT OR DELETE ON public.students FOR EACH ROW EXECUTE FUNCTION public.update_class_student_count();
+CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+CREATE TRIGGER on_attendance_change AFTER INSERT OR UPDATE OR DELETE ON public.attendance_records FOR EACH ROW EXECUTE FUNCTION public.update_attendance_rates();

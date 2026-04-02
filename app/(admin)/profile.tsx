@@ -43,13 +43,15 @@ export default function AdminProfile() {
       >
         <View style={styles.profileHeader}>
           <View style={styles.avatarLarge}>
-            <MaterialIcons name="admin-panel-settings" size={60} color="#FFFFFF" />
+            <View style={styles.avatarInner}>
+              <MaterialIcons name="admin-panel-settings" size={48} color="#FFFFFF" />
+            </View>
           </View>
           <Text style={styles.name}>{user?.name}</Text>
           <Text style={styles.email}>{user?.email}</Text>
           <View style={styles.roleBadge}>
-            <MaterialIcons name="verified" size={16} color={colors.admin} />
-            <Text style={styles.roleText}>Office Admin</Text>
+            <MaterialIcons name="verified" size={14} color={colors.admin} />
+            <Text style={styles.roleText}>Office Administrator</Text>
           </View>
         </View>
       </LinearGradient>
@@ -133,10 +135,20 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  avatarInner: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   name: {
     ...typography.h1,

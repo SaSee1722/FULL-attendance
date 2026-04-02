@@ -1,42 +1,65 @@
 export const colors = {
-  // Base colors
-  background: '#F9FAFB',
-  surface: '#FFFFFF',
-  surfaceSecondary: '#F3F4F6',
-  border: '#E5E7EB',
+  // Midnight Scholar Core Palette
+  navyDeep: '#0a192f',
+  primaryBlue: '#1152d4',
+  pureWhite: '#ffffff',
+  softGray: '#f8f9fa',
+  accentBlue: '#2563eb', // A slightly brighter blue for interactions
+  
+  // Refined Base colors
+  background: '#f8f9fa',
+  surface: '#ffffff',
+  surfaceSecondary: '#f1f5f9',
+  border: '#e2e8f0',
   
   // Text
-  textPrimary: '#111827',
-  textSecondary: '#4B5563',
-  textTertiary: '#9CA3AF',
+  textPrimary: '#0a192f', // Using navyDeep for text
+  textSecondary: '#475569',
+  textTertiary: '#94a3b8',
   
-  // Brand colors by role
-  admin: '#4F46E5', // Indigo 600
-  adminLight: '#EEF2FF',
-  dean: '#059669', // Emerald 600
-  deanLight: '#ECFDF5',
-  staff: '#D97706', // Amber 600
-  staffLight: '#FFFBEB',
+  // Brand colors by role (Matching Primary Blue for all mostly, but subtle variations if needed)
+  admin: '#0a192f',
+  adminLight: '#f1f5f9',
+  adminDark: '#050c18',
+  dean: '#1152d4',
+  deanLight: '#eff6ff',
+  deanDark: '#0e41a9',
+  staff: '#1152d4', 
+  staffLight: '#eff6ff',
+  staffDark: '#0e41a9',
   
   // Status colors
-  success: '#10B981',
-  successLight: '#D1FAE5',
-  warning: '#F59E0B',
-  warningLight: '#FEF3C7',
-  error: '#EF4444',
-  errorLight: '#FEE2E2',
-  info: '#3B82F6',
-  infoLight: '#DBEAFE',
+  success: '#10b981',
+  successLight: '#d1fae5',
+  warning: '#f59e0b',
+  warningLight: '#fef3c7',
+  error: '#ef4444',
+  errorLight: '#fee2e2',
+  info: '#3b82f6',
+  infoLight: '#dbeafe',
   
   // Attendance status
-  present: '#10B981',
-  presentLight: '#D1FAE5',
-  absent: '#EF4444',
-  absentLight: '#FEE2E2',
-  onDuty: '#3B82F6',
-  onDutyLight: '#DBEAFE',
-  unapproved: '#F59E0B',
-  unapprovedLight: '#FEF3C7',
+  present: '#10b981',
+  presentLight: '#d1fae5',
+  absent: '#ef4444',
+  absentLight: '#fee2e2',
+  onDuty: '#3b82f6',
+  onDutyLight: '#dbeafe',
+  unapproved: '#f59e0b',
+  unapprovedLight: '#fef3c7',
+
+  // Glassmorphism supports
+  glassWhite: 'rgba(255, 255, 255, 0.2)',
+  glassDark: 'rgba(10, 25, 47, 0.05)',
+  overlay: 'rgba(10, 25, 47, 0.4)',
+};
+
+export const gradients = {
+  admin: [colors.admin, colors.adminDark],
+  dean: [colors.dean, colors.deanDark],
+  staff: [colors.staff, colors.staffDark],
+  surface: ['#FFFFFF', '#F8FAFC'],
+  glass: ['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.05)'],
 };
 
 export const spacing = {
@@ -46,23 +69,27 @@ export const spacing = {
   lg: 24,
   xl: 32,
   xxl: 48,
+  xxxl: 64,
 };
 
 export const typography = {
   h1: {
-    fontSize: 28,
-    fontWeight: '700' as const,
-    lineHeight: 36,
+    fontSize: 32,
+    fontWeight: '800' as const,
+    letterSpacing: -0.75,
+    lineHeight: 40,
   },
   h2: {
-    fontSize: 22,
-    fontWeight: '600' as const,
-    lineHeight: 28,
+    fontSize: 24,
+    fontWeight: '700' as const,
+    letterSpacing: -0.5,
+    lineHeight: 32,
   },
   h3: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600' as const,
-    lineHeight: 24,
+    letterSpacing: -0.25,
+    lineHeight: 28,
   },
   body: {
     fontSize: 16,
@@ -74,51 +101,67 @@ export const typography = {
     fontWeight: '500' as const,
     lineHeight: 24,
   },
+  bodySemibold: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    lineHeight: 24,
+  },
   caption: {
     fontSize: 14,
     fontWeight: '400' as const,
+    color: '#64748B', // Slate 500
     lineHeight: 20,
   },
   label: {
     fontSize: 14,
     fontWeight: '600' as const,
     lineHeight: 20,
+    letterSpacing: 0.5,
   },
   small: {
     fontSize: 12,
-    fontWeight: '400' as const,
+    fontWeight: '500' as const,
     lineHeight: 16,
   },
 };
 
 export const borderRadius = {
-  sm: 6,
-  md: 10,
-  lg: 14,
-  xl: 20,
+  xs: 6,
+  sm: 10,
+  md: 14,
+  lg: 20,
+  xl: 28,
+  xxl: 36,
   full: 9999,
 };
 
 export const shadows = {
   sm: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowRadius: 3,
     elevation: 2,
   },
   md: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  lg: {
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 10,
     elevation: 5,
   },
+  lg: {
+    shadowColor: colors.admin,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  premium: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 25 },
+    shadowOpacity: 0.12,
+    shadowRadius: 35,
+    elevation: 15,
+  }
 };

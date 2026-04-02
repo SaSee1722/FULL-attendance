@@ -8,17 +8,21 @@ interface StatCardProps {
   label: string;
   value: string | number;
   color: string;
-  bgColor: string;
+  bgColor?: string;
 }
 
 export function StatCard({ icon, label, value, color, bgColor }: StatCardProps) {
+  const iconBg = bgColor || `${color}15`;
+
   return (
-    <View style={[styles.container, shadows.sm]}>
-      <View style={[styles.iconContainer, { backgroundColor: bgColor }]}>
+    <View style={styles.container}>
+      <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
         <MaterialIcons name={icon} size={24} color={color} />
       </View>
-      <Text style={styles.value}>{value}</Text>
-      <Text style={styles.label}>{label}</Text>
+      <View style={styles.content}>
+        <Text style={styles.label}>{label}</Text>
+        <Text style={styles.value}>{value}</Text>
+      </View>
     </View>
   );
 }
@@ -26,28 +30,37 @@ export function StatCard({ icon, label, value, color, bgColor }: StatCardProps) 
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    borderRadius: borderRadius.xl,
+    padding: spacing.md,
+    flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    minWidth: 100,
+    ...shadows.md,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.03)',
   },
   iconContainer: {
     width: 48,
     height: 48,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.lg,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    marginRight: spacing.md,
   },
-  value: {
-    ...typography.h2,
-    color: colors.textPrimary,
-    marginBottom: spacing.xs,
+  content: {
+    flex: 1,
   },
   label: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textAlign: 'center',
+    ...typography.small,
+    color: colors.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  value: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    fontWeight: '800',
+    fontSize: 22,
   },
 });
