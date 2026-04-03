@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator,
-  Alert, LayoutAnimation, Platform, UIManager
+  Alert, LayoutAnimation, Platform, UIManager, TextInput
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { MaterialIcons, Ionicons, FontAwesome } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { dataService, Student, ClassData } from '../../services/dataService';
 import { useAuth } from '../../hooks/useAuth';
-import { shadows } from '../../constants/theme';
+import { gradients, shadows, colors } from '../../constants/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -16,13 +17,15 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 // ── 5-day date strip component ─────────────────────────────────────
 function AttendanceDateStrip({
-  selectedDate, onSelect, holidays
+  selectedDate, onSelect, holidays, lockedDates
 }: { 
   selectedDate: string; 
   onSelect: (d: string) => void; 
-  holidays: string[] 
+  holidays: string[];
+  lockedDates: string[];
 }) {
   const dates = [];
+  const todayStr = new Date().toISOString().split('T')[0];
   for (let i = -2; i <= 2; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
@@ -36,25 +39,34 @@ function AttendanceDateStrip({
         const day = d.getDate();
         const dayName = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
         const isSelected = dateStr === selectedDate;
-        const isHoliday = holidays.includes(dateStr);
+        const isFuture = dateStr > todayStr;
 
         return (
           <Pressable
             key={dateStr}
             onPress={() => onSelect(dateStr)}
+            disabled={isFuture}
             style={[
               s.dateItem,
               isSelected && s.dateItemSelected,
-              isHoliday && s.dateItemHoliday
+              isFuture && { opacity: 0.3 }
             ]}
           >
-            <Text style={[s.dateDayName, isSelected && s.dateTextSelected, isHoliday && s.dateTextHoliday]}>
+            <Text style={[s.dateDayName, isSelected && s.dateTextSelectedName]}>
               {dayName}
             </Text>
-            <Text style={[s.dateDay, isSelected && s.dateTextSelected, isHoliday && s.dateTextHoliday]}>
+            <Text style={[s.dateDay, isSelected && s.dateTextSelectedDay]}>
               {day}
             </Text>
-            {isHoliday && <View style={s.holidayDot} />}
+            {isSelected && <View style={s.selectedDot} />}
+            {holidays.some(h => (typeof h === 'string' ? h : (h as any).date) === dateStr) && (
+              <View style={s.holidayDot} />
+            )}
+            {lockedDates.includes(dateStr) && (
+              <View style={s.dateTickCorner}>
+                <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+              </View>
+            )}
           </Pressable>
         );
       })}
@@ -66,8 +78,8 @@ function AttendanceDateStrip({
 export default function StaffAttendance() {
   const { user } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
-  const [classes, setClasses] = useState<ClassData[]>([]);
   const [selectedClass, setSelectedClass] = useState<ClassData | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<Record<string, 'present'|'absent'|'on-duty'|'unapproved'>>({});
@@ -75,6 +87,7 @@ export default function StaffAttendance() {
   const [holidays, setHolidays] = useState<string[]>([]);
   
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -82,7 +95,6 @@ export default function StaffAttendance() {
   const loadData = useCallback(async () => {
     try {
       const cls = await dataService.getClasses();
-      setClasses(cls);
       if (cls.length > 0 && !selectedClass) {
         setSelectedClass(cls[0]);
       }
@@ -118,11 +130,19 @@ export default function StaffAttendance() {
       // If records exist, mark date as potentially locked
       if (records.length > 0) {
         setLockedDates(prev => [...new Set([...prev, date])]);
+      } else {
+        // AUTO-MARK ON HOLIDAYS: If no records, but it's a holiday, set default to present
+        const isHoliday = holidays.some(h => (typeof h === 'string' ? h : (h as any).date) === date);
+        if (isHoliday) {
+          const marked: Record<string, any> = {};
+          allStudents.forEach(s => marked[s.id] = 'present');
+          setAttendance(marked);
+        }
       }
     } catch (e) {
       console.error('Load class attendance error:', e);
     }
-  }, [selectedClass, date]);
+  }, [selectedClass, date, holidays]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadClassAttendance(); }, [loadClassAttendance]);
@@ -142,12 +162,12 @@ export default function StaffAttendance() {
   }, [selectedClass, loadClassAttendance, loadData]);
 
   const toggleAttendance = (studentId: string, status: 'present'|'absent'|'on-duty'|'unapproved') => {
-    if (lockedDates.includes(date)) {
-      Alert.alert('Locked', 'Attendance for this date is already marked and locked.');
+    if (lockedDates.includes(date) || isFutureDate) {
+      Alert.alert('Restricted', 'Attendance cannot be modified for this date.');
       return;
     }
     if (isHoliday) {
-      Alert.alert('Leave Day', 'The Dean has marked this day as a department-wide leave. Attendance cannot be recorded.');
+      Alert.alert('Holiday Mode', 'This day is marked as a holiday. All students are set to "Present" by default.');
       return;
     }
 
@@ -170,8 +190,7 @@ export default function StaffAttendance() {
   };
 
   const saveAttendance = async () => {
-    if (!selectedClass) return;
-    if (lockedDates.includes(date)) return;
+    if (!selectedClass || lockedDates.includes(date) || isFutureDate) return;
 
     setSaving(true);
     try {
@@ -193,7 +212,17 @@ export default function StaffAttendance() {
     }
   };
 
-  const isHoliday = holidays.includes(date);
+  const filteredStudents = React.useMemo(() => {
+    return students.filter(s => 
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.rollNo.toString().includes(searchQuery)
+    );
+  }, [students, searchQuery]);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const activeHoliday = holidays.find(h => (typeof h === 'string' ? h : (h as any).date) === date) as any;
+  const isHoliday = !!activeHoliday;
+  const isFutureDate = date > todayStr;
 
   if (loading) {
     return (
@@ -204,106 +233,130 @@ export default function StaffAttendance() {
   }
 
   return (
-    <SafeAreaView style={s.root} edges={['top']}>
+    <View style={s.root}>
       {/* Header */}
-      <View style={s.header}>
-        <Pressable onPress={() => router.back()} style={s.backBtn}>
-          <MaterialIcons name="arrow-back-ios" size={20} color="#0F172A" />
-        </Pressable>
-        <View>
-          <Text style={s.title}>Attendance</Text>
-          <Text style={s.subtitle}>{selectedClass?.name || 'Loading...'}</Text>
+      <LinearGradient
+        colors={gradients.premium as any}
+        style={[s.header, { paddingTop: insets.top + 8 }]}
+      >
+        <View style={s.navRow}>
+          <Pressable onPress={() => router.back()} style={s.backCircle}>
+            <MaterialIcons name="arrow-back-ios" size={16} color="#FFF" style={{ marginLeft: 6 }} />
+          </Pressable>
+          <View style={s.titleBlock}>
+            <Text style={s.title}>{selectedClass?.name || 'Loading...'}</Text>
+            <Text style={s.subtitle}>{selectedClass?.section?.toUpperCase() || 'SECTION'} • ATTENDANCE</Text>
+          </View>
+          <View style={{ width: 40 }} />
         </View>
-        <View style={s.headerRight} />
-      </View>
 
-      {/* Date Strip */}
-      <AttendanceDateStrip 
-        selectedDate={date} 
-        onSelect={setDate} 
-        holidays={holidays}
-      />
+        <AttendanceDateStrip 
+          selectedDate={date} 
+          onSelect={setDate} 
+          holidays={holidays}
+          lockedDates={lockedDates}
+        />
+      </LinearGradient>
 
-      {isHoliday && (
-        <View style={s.holidayBanner}>
-          <Ionicons name="sunny" size={18} color="#15803D" />
-          <Text style={s.holidayText}>Dean marked this day as a holiday/leave.</Text>
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+        {/* Search Bar */}
+        <View style={s.searchContainer}>
+          <View style={s.searchBar}>
+            <Ionicons name="search" size={20} color="#94A3B8" />
+            <TextInput
+              style={s.searchBarInput}
+              placeholder="Search student name or roll no..."
+              placeholderTextColor="#94A3B8"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
         </View>
-      )}
 
-      {/* Class Picker */}
-      <View style={s.pickerRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20 }}>
-          {classes.map(c => (
-            <Pressable
-              key={c.id}
-              onPress={() => setSelectedClass(c)}
-              style={[s.classPill, selectedClass?.id === c.id && s.classPillActive]}
-            >
-              <Text style={[s.classPillTxt, selectedClass?.id === c.id && s.classPillTxtActive]}>
-                {c.section}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
+        <View style={s.listMeta}>
+          <Text style={s.studentCount}>{filteredStudents.length} Students Enrolled</Text>
+        </View>
 
-      {/* Student List */}
-      <ScrollView contentContainerStyle={s.list}>
-        {students.map((student, idx) => {
-          const status = attendance[student.id] || 'present';
-          return (
-            <View key={student.id} style={s.studentCard}>
-              <View style={s.studentInfo}>
-                <View style={s.avatar}>
-                  <Text style={s.avatarTxt}>{student.name.charAt(0)}</Text>
-                </View>
-                <View>
-                  <Text style={s.studentName}>{student.name}</Text>
-                  <View style={s.rollRow}>
-                    <Text style={s.rollNo}>{student.rollNo}</Text>
-                    <View style={s.dot} />
-                    <Text style={s.studentRate}>{Math.round(student.attendanceRate)}% Attendance</Text>
+        {isHoliday && (
+          <View style={s.holidayBanner}>
+            <Ionicons name="sunny" size={18} color="#15803D" />
+            <Text style={s.holidayText}>
+              Holiday/Event: {activeHoliday.note ? activeHoliday.note.replace(/\[.*?\]\s*/, '') : 'Dean marked this day as leave'}
+            </Text>
+          </View>
+        )}
+
+
+
+        {/* Student List */}
+        <View style={s.list}>
+          {filteredStudents.map((student, idx) => {
+            const status = attendance[student.id] || 'present';
+            return (
+              <View key={student.id} style={s.studentCard}>
+                <View style={s.studentHeader}>
+                  <View style={s.nameBlock}>
+                    <Text style={s.studentName}>{student.name}</Text>
+                    <Text style={s.rollNo}>ROLL: {student.rollNo}</Text>
+                  </View>
+                  <View style={s.statsBlock}>
+                    <Text style={[s.percentageTxt, { color: student.attendanceRate >= 80 ? colors.success : student.attendanceRate >= 60 ? colors.warning : colors.error }]}>
+                      {Math.round(student.attendanceRate)}%
+                    </Text>
+                    <Text style={s.statsLabel}>TOTAL</Text>
                   </View>
                 </View>
-              </View>
 
-              <View style={s.actionRow}>
-                <Pressable
-                  onPress={() => toggleAttendance(student.id, 'present')}
-                  style={[s.statusBtn, status === 'present' && s.btnPresent]}
-                >
-                  <MaterialIcons name="check" size={18} color={status === 'present' ? '#FFF' : '#CBD5E1'} />
-                </Pressable>
-                
-                <Pressable
-                  onPress={() => toggleAttendance(student.id, 'absent')}
-                  style={[s.statusBtn, (status === 'absent' || status === 'unapproved') && s.btnAbsent]}
-                >
-                  <MaterialIcons 
-                    name={status === 'unapproved' ? 'block' : 'close'} 
-                    size={18} 
-                    color={(status === 'absent' || status === 'unapproved') ? '#FFF' : '#CBD5E1'} 
-                  />
-                </Pressable>
+                <View style={s.statusGrid}>
+                  <Pressable
+                    onPress={() => toggleAttendance(student.id, 'present')}
+                    style={[s.statusTab, status === 'present' && s.tabPresent]}
+                  >
+                    <Text style={[s.tabTxt, status === 'present' && s.tabTxtActive]}>P</Text>
+                  </Pressable>
+                  
+                  <Pressable
+                    onPress={() => toggleAttendance(student.id, 'absent')}
+                    style={[s.statusTab, (status === 'absent' || status === 'unapproved') && s.tabAbsent]}
+                  >
+                    <Text style={[s.tabTxt, (status === 'absent' || status === 'unapproved') && s.tabTxtActive]}>A</Text>
+                  </Pressable>
 
-                <Pressable
-                  onPress={() => toggleAttendance(student.id, 'on-duty')}
-                  style={[s.statusBtn, status === 'on-duty' && s.btnOD]}
-                >
-                  <Text style={[s.odTxt, status === 'on-duty' && { color: '#FFF' }]}>OD</Text>
-                </Pressable>
+                  <Pressable
+                    onPress={() => toggleAttendance(student.id, 'on-duty')}
+                    style={[s.statusTab, status === 'on-duty' && s.tabOD]}
+                  >
+                    <Text style={[s.tabTxt, status === 'on-duty' && s.tabTxtActive]}>OD</Text>
+                  </Pressable>
+                </View>
+
+                {(status === 'absent' || status === 'unapproved') && (
+                  <View style={s.absentActions}>
+                    <Pressable 
+                      style={[s.subBtn, { backgroundColor: status === 'absent' ? '#FEE2E2' : '#F1F5F9' }]}
+                      onPress={() => toggleAttendance(student.id, 'absent')}
+                    >
+                      <Text style={[s.subBtnTxt, { color: '#EF4444' }]}>APPR.</Text>
+                    </Pressable>
+                    <Pressable 
+                      style={[s.subBtn, { backgroundColor: status === 'unapproved' ? '#7F1D1D' : '#F1F5F9' }]}
+                      onPress={() => toggleAttendance(student.id, 'unapproved')}
+                    >
+                      <Text style={[s.subBtnTxt, { color: status === 'unapproved' ? '#FFF' : '#7F1D1D' }]}>UNAPPR.</Text>
+                    </Pressable>
+                  </View>
+                )}
               </View>
-            </View>
-          );
-        })}
+            );
+          })}
+        </View>
       </ScrollView>
 
       {/* Bottom Bar */}
-      {!lockedDates.includes(date) && !isHoliday && (
-        <View style={[s.bottomBar, { paddingBottom: 20 }]}>
+      {!lockedDates.includes(date) && !isFutureDate && (
+        <View style={[s.bottomBar, { paddingBottom: 30 }]}>
           <Pressable
-            style={[s.saveBtn, saving && { opacity: 0.7 }]}
+            style={[s.saveBtn, saving && { opacity: 0.7 }, isHoliday && { backgroundColor: '#10B981' }]}
             onPress={saveAttendance}
             disabled={saving}
           >
@@ -311,21 +364,21 @@ export default function StaffAttendance() {
               <ActivityIndicator color="#FFF" />
             ) : (
               <>
-                <Text style={s.saveBtnTxt}>SUBMIT ATTENDANCE</Text>
-                <MaterialIcons name="send" size={18} color="#FFF" />
+                <Ionicons name={isHoliday ? "checkmark-circle" : "person"} size={18} color="#FFF" />
+                <Text style={s.saveBtnTxt}>{isHoliday ? 'Finalize Holiday Attendance' : 'Submit Attendance'}</Text>
               </>
             )}
           </Pressable>
         </View>
       )}
 
-      {lockedDates.includes(date) && (
+      {isFutureDate && (
         <View style={s.lockedBanner}>
-          <FontAwesome name="lock" size={16} color="#64748B" />
-          <Text style={s.lockedTxt}>ATTENDANCE FINALIZED</Text>
+          <Ionicons name="time" size={16} color="#64748B" />
+          <Text style={s.lockedTxt}>FUTURE DATE LOCKED</Text>
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -333,30 +386,91 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F8FAFC' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15,
-    backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
+    paddingBottom: 20, paddingHorizontal: 20,
+    borderBottomLeftRadius: 40, borderBottomRightRadius: 40,
   },
-  backBtn: { width: 40, height: 40, justifyContent: 'center' },
-  title: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
-  subtitle: { fontSize: 13, color: '#64748B', fontWeight: '600' },
-  headerRight: { width: 40 },
+  navRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    width: '100%', marginBottom: 20,
+  },
+  backCircle: {
+    width: 40, height: 40, borderRadius: 20, 
+    backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center'
+  },
+  titleBlock: { flex: 1, alignItems: 'center' },
+  title: { fontSize: 20, fontWeight: '900', color: '#FFF', textAlign: 'center' },
+  subtitle: { fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: '800', letterSpacing: 1.2, marginTop: 4 },
+  moreBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-end' },
 
   // Date Strip
   dateStrip: {
-    flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20,
-    backgroundColor: '#FFF', paddingVertical: 12, ...shadows.sm,
+    flexDirection: 'row', justifyContent: 'space-between', width: '100%',
+    paddingVertical: 10,
   },
   dateItem: {
-    width: 58, height: 75, borderRadius: 18, backgroundColor: '#F1F5F9',
+    width: 60, height: 75, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center', alignItems: 'center', gap: 4,
   },
-  dateItemSelected: { backgroundColor: '#4F7FFF' },
-  dateItemHoliday: { backgroundColor: '#DCFCE7', borderWidth: 1, borderColor: '#86EFAC' },
-  dateDayName: { fontSize: 10, fontWeight: '800', color: '#94A3B8' },
-  dateDay: { fontSize: 18, fontWeight: '900', color: '#1E293B' },
-  dateTextSelected: { color: '#FFF' },
-  dateTextHoliday: { color: '#15803D' },
-  holidayDot: { position: 'absolute', bottom: 6, width: 4, height: 4, borderRadius: 2, backgroundColor: '#15803D' },
+  dateItemSelected: { 
+    backgroundColor: '#FFF', height: 90, marginTop: -7.5,
+    ...shadows.md,
+  },
+  dateDayName: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.8)' },
+  dateDay: { fontSize: 18, fontWeight: '900', color: '#FFF' },
+  dateTextSelectedName: { color: '#4F7FFF' },
+  dateTextSelectedDay: { color: '#1E293B', fontSize: 22 },
+  selectedDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#4F7FFF', marginTop: 4 },
+  holidayDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#F59E0B', position: 'absolute', top: 8, right: 8 },
+  dateTickCorner: {
+    position: 'absolute', top: 4, right: 4,
+    backgroundColor: '#FFF', borderRadius: 10,
+    width: 16, height: 16, justifyContent: 'center', alignItems: 'center',
+    ...shadows.sm,
+  },
+
+  // Search
+  searchContainer: { paddingHorizontal: 20, marginTop: 25 },
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#F1F5F9', paddingHorizontal: 16,
+    borderRadius: 14, height: 48,
+  },
+  searchBarInput: { flex: 1, color: '#1E293B', fontSize: 14, fontWeight: '600' },
+  placeholder: { color: '#94A3B8', fontSize: 14, fontWeight: '500' },
+
+  // List Meta
+  listMeta: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 22, marginTop: 25, marginBottom: 15,
+  },
+  studentCount: { fontSize: 15, fontWeight: '700', color: '#64748B' },
+
+  // Student Cards
+  list: { paddingHorizontal: 16, paddingBottom: 100 },
+  studentCard: {
+    backgroundColor: '#FFF', padding: 16, borderRadius: 24, marginBottom: 16,
+    ...shadows.sm, borderWidth: 1, borderColor: '#F1F5F9',
+  },
+  studentHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  nameBlock: { flex: 1 },
+  studentName: { fontSize: 16, fontWeight: '700', color: '#1E293B' },
+  rollNo: { fontSize: 12, color: '#94A3B8', fontWeight: '600', marginTop: 2 },
+
+  statsBlock: { alignItems: 'flex-end' },
+  percentageTxt: { fontSize: 18, fontWeight: '900' },
+  statsLabel: { fontSize: 8, fontWeight: '800', color: '#94A3B8', letterSpacing: 1 },
+
+  statusGrid: { flexDirection: 'row', gap: 10 },
+  statusTab: { flex: 1, height: 42, borderRadius: 12, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  tabPresent: { backgroundColor: '#10B981' },
+  tabAbsent: { backgroundColor: '#EF4444' },
+  tabOD: { backgroundColor: '#2563EB' },
+  tabTxt: { fontSize: 14, fontWeight: '900', color: '#94A3B8' },
+  tabTxtActive: { color: '#FFF' },
+
+  absentActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  subBtn: { flex: 1, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  subBtnTxt: { fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
 
   holidayBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#DCFCE7',
@@ -374,39 +488,17 @@ const s = StyleSheet.create({
   classPillTxt: { fontSize: 12, fontWeight: '700', color: '#64748B' },
   classPillTxtActive: { color: '#FFF' },
 
-  // Student List
-  list: { padding: 16, paddingBottom: 100 },
-  studentCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF',
-    padding: 14, borderRadius: 20, marginBottom: 12, ...shadows.sm,
-  },
-  studentInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#4F7FFF15', justifyContent: 'center', alignItems: 'center' },
-  avatarTxt: { fontSize: 16, fontWeight: '800', color: '#4F7FFF' },
-  studentName: { fontSize: 15, fontWeight: '700', color: '#1E293B', marginBottom: 2 },
-  rollRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  rollNo: { fontSize: 12, color: '#6366F1', fontWeight: '800' },
-  dot: { width: 3, height: 3, borderRadius: 2, backgroundColor: '#CBD5E1' },
-  studentRate: { fontSize: 11, color: '#94A3B8', fontWeight: '600' },
-
-  actionRow: { flexDirection: 'row', gap: 8 },
-  statusBtn: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
-  btnPresent: { backgroundColor: '#10B981' },
-  btnAbsent: { backgroundColor: '#EF4444' },
-  btnOD: { backgroundColor: '#3B82F6' },
-  odTxt: { fontSize: 10, fontWeight: '900', color: '#CBD5E1' },
-
   // Bottom Bar
   bottomBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#FFF', padding: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9',
+    backgroundColor: '#FFF', padding: 20, borderTopWidth: 1, borderTopColor: '#F1F5F9',
   },
   saveBtn: {
-    backgroundColor: '#4F46E5', height: 54, borderRadius: 16,
-    flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10,
+    backgroundColor: '#1D4ED8', height: 60, borderRadius: 18,
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12,
     ...shadows.md,
   },
-  saveBtnTxt: { color: '#FFF', fontSize: 14, fontWeight: '900', letterSpacing: 0.5 },
+  saveBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
 
   lockedBanner: {
     position: 'absolute', bottom: 20, alignSelf: 'center',

@@ -1,341 +1,342 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, Alert,
+  View, Text, StyleSheet, ScrollView, Pressable, TextInput,
+  Image, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import { 
+  User, Mail, School, BadgeCheck,
+  LogOut, Camera, Edit3,
+  Info, IdCard
+} from 'lucide-react-native';
 import { useAuth } from '../../hooks/useAuth';
+import { authService } from '../../services/authService';
+import { supabase } from '../../lib/supabase';
+import { colors, spacing, shadows, gradients } from '../../constants/theme';
+import { useRouter } from 'expo-router';
 
 export default function StaffProfile() {
-  const { user, logout } = useAuth();
   const insets = useSafeAreaInsets();
+  const { user, logout, refreshUser } = useAuth();
   const router = useRouter();
 
+  const [imageUri, setImageUri] = useState<string | null>(user?.profileImage || null);
+  const [bio, setBio] = useState('');
+  const [editBioModal, setEditBioModal] = useState(false);
+  const [bioInput, setBioInput] = useState('');
+  const [savingBio, setSavingBio] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [stats, setStats] = useState({ classes: 0, students: 0, attendance: 0 });
+  const [loadingStats, setLoadingStats] = useState(true);
+
+  const loadBio = useCallback(async () => {
+    try {
+      const { data } = await supabase.from('profiles').select('bio').eq('id', user?.id || '').maybeSingle();
+      if (data?.bio) setBio(data.bio);
+    } catch {}
+  }, [user?.id]);
+
+  const loadStats = useCallback(async () => {
+    try {
+      setLoadingStats(true);
+      const { dataService } = await import('../../services/dataService');
+      const cls = await dataService.getClasses();
+      const totalStudents = cls.reduce((acc, c) => acc + (c.studentCount || 0), 0);
+      const avgRate = cls.length > 0 
+        ? Math.round(cls.reduce((acc, c) => acc + (c.attendanceRate || 0), 0) / cls.length)
+        : 0;
+      setStats({ classes: cls.length, students: totalStudents, attendance: avgRate });
+    } catch {} finally { setLoadingStats(false); }
+  }, []);
+
+  useEffect(() => {
+    setImageUri(user?.profileImage || null);
+    loadBio();
+    loadStats();
+  }, [user, loadBio, loadStats]);
+
+  const pickImage = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission Required', 'Please allow access to your photo library.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, aspect: [1, 1], quality: 0.7,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setUploadingImage(true);
+        const uri = result.assets[0].uri;
+        await authService.updateProfileImage(uri);
+        setImageUri(uri);
+        if (refreshUser) await refreshUser();
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to update image.');
+    } finally { setUploadingImage(false); }
+  };
+
+  const saveBio = async () => {
+    try {
+      setSavingBio(true);
+      const trimmed = bioInput.trim();
+      await supabase.from('profiles').update({ bio: trimmed }).eq('id', user?.id || '');
+      setBio(trimmed);
+      setEditBioModal(false);
+    } catch {
+      Alert.alert('Error', 'Failed to save bio');
+    } finally { setSavingBio(false); }
+  };
+
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/auth/login');
-          },
-        },
-      ]
-    );
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out', style: 'destructive',
+        onPress: async () => { await logout(); router.replace('/auth/login'); },
+      },
+    ]);
   };
 
   const initials = user?.name
-    ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-    : 'S';
+    ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+    : '??';
 
   const staffId = user?.id ? `#MS-${user.id.slice(-5).toUpperCase()}` : '#MS-XXXXX';
 
-  const menuItems = [
-    {
-      group: 'Account',
-      items: [
-        { icon: 'person-outline', label: 'Edit Profile', badge: null, color: '#4F46E5' },
-        { icon: 'notifications-outline', label: 'Notifications', badge: 'ON', color: '#059669' },
-        { icon: 'shield-outline', label: 'Privacy & Security', badge: null, color: '#7C3AED' },
-      ],
-    },
-    {
-      group: 'Support',
-      items: [
-        { icon: 'help-circle-outline', label: 'Help & Support', badge: null, color: '#D97706' },
-        { icon: 'information-circle-outline', label: 'About App', badge: 'v4.2', color: '#64748B' },
-      ],
-    },
-  ];
-
   return (
-    <View style={p.root}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 110 }}
-      >
-        {/* ── HERO HEADER ── */}
-        <LinearGradient
-          colors={['#1E1B4B', '#312E81', '#1E293B']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={[p.hero, { paddingTop: insets.top + 16 }]}
-        >
-          <View style={p.heroBlob} />
+    <View style={styles.root}>
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
 
-          {/* Top bar */}
-          <View style={p.heroTopBar}>
-            <View style={p.brandRow}>
-              <View style={p.brandIcon}>
-                <MaterialIcons name="school" size={18} color="#FFF" />
+        {/* ── Profile Header ── */}
+        <LinearGradient colors={gradients.premium as any} style={[styles.profileHeader, { paddingTop: insets.top + 20 }]}>
+          <Animated.View entering={FadeInUp.delay(100).duration(800)} style={styles.avatarGroup}>
+            <Pressable onPress={pickImage} style={[styles.avatarContainer, shadows.premium]} disabled={uploadingImage}>
+              {uploadingImage
+                ? <View style={styles.avatarMain}><ActivityIndicator color="#FFF" /></View>
+                : imageUri
+                  ? <Image source={{ uri: imageUri }} style={styles.avatarMain} />
+                  : <View style={styles.avatarMain}>
+                      <Text style={styles.avatarLetters}>{initials}</Text>
+                    </View>
+              }
+              <View style={styles.cameraPill}>
+                <Camera size={14} color="#FFF" />
               </View>
-              <Text style={p.brandName}>Midnight Scholar</Text>
-            </View>
-            <Pressable style={p.bellBtn}>
-              <Ionicons name="notifications-outline" size={22} color="#FFF" />
             </Pressable>
-          </View>
+          </Animated.View>
 
-          {/* Avatar section */}
-          <View style={p.avatarSection}>
-            {/* Avatar with gradient ring + edit button anchored to corner */}
-            <View style={p.avatarWrapper}>
-              <View style={p.avatarRing}>
-                <LinearGradient
-                  colors={['#818CF8', '#4F46E5', '#7C3AED']}
-                  style={p.avatarGrad}
-                >
-                  <Text style={p.avatarText}>{initials}</Text>
-                </LinearGradient>
-              </View>
-              <Pressable style={p.editDot}>
-                <MaterialIcons name="edit" size={11} color="#FFF" />
-              </Pressable>
+          <Animated.View entering={FadeInDown.delay(200).duration(800)} style={styles.profileMeta}>
+            <Text style={styles.userName}>{user?.name || 'Staff Member'}</Text>
+            <View style={styles.proBadge}>
+              <BadgeCheck size={14} color="#34D399" />
+              <Text style={styles.proBadgeText}>Senior Faculty</Text>
             </View>
-
-            <Text style={p.userName}>{user?.name || 'Staff Member'}</Text>
-
-            <View style={p.rolePill}>
-              <View style={p.roleDot} />
-              <Text style={p.roleTxt}>SENIOR FACULTY</Text>
-            </View>
-          </View>
-
-          {/* Stats strip */}
-          <View style={p.statsStrip}>
-            <View style={p.statItem}>
-              <Text style={p.statVal}>{user?.department || '—'}</Text>
-              <Text style={p.statLbl}>DEPARTMENT</Text>
-            </View>
-            <View style={p.statDiv} />
-            <View style={p.statItem}>
-              <Text style={p.statVal}>{staffId}</Text>
-              <Text style={p.statLbl}>STAFF ID</Text>
-            </View>
-          </View>
+            <Text style={styles.userEmail}>{user?.email || ''}</Text>
+          </Animated.View>
         </LinearGradient>
 
-        {/* ── INFO CARDS ── */}
-        <View style={p.infoGroup}>
-          <InfoCard
-            icon="email"
-            iconColor="#4F46E5"
-            iconBg="#EEF2FF"
-            label="WORK EMAIL"
-            value={user?.email || '—'}
-          />
-          <InfoCard
-            icon="badge"
-            iconColor="#059669"
-            iconBg="#ECFDF5"
-            label="ROLE"
-            value={`Staff · ${user?.department || 'Faculty'}`}
-          />
-          <InfoCard
-            icon="location-on"
-            iconColor="#D97706"
-            iconBg="#FFFBEB"
-            label="DEPARTMENT"
-            value={user?.department || '—'}
-          />
-        </View>
+        {/* ── Integrated Stats Bar ── */}
+        <Animated.View entering={FadeInUp.delay(400).duration(800)} style={[styles.statsPanel, shadows.premium]}>
+          {[
+            { label: 'Classes', value: stats.classes, icon: School, color: '#818CF8' },
+            { label: 'Students', value: stats.students, icon: User, color: '#34D399' },
+            { label: 'Avg Att.', value: `${stats.attendance}%`, icon: BadgeCheck, color: '#F59E0B' },
+          ].map((s, i) => (
+            <View key={s.label} style={[styles.statCell, i < 2 && styles.statDivider]}>
+              <View style={[styles.statIconCircle, { backgroundColor: `${s.color}15` }]}>
+                <s.icon size={16} color={s.color} />
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={styles.statNumber}>{loadingStats ? '—' : s.value}</Text>
+                <Text style={styles.statDescription}>{s.label}</Text>
+              </View>
+            </View>
+          ))}
+        </Animated.View>
 
-        {/* ── MENU GROUPS ── */}
-        {menuItems.map((group) => (
-          <View key={group.group} style={p.menuGroup}>
-            <Text style={p.menuGroupLabel}>{group.group.toUpperCase()}</Text>
-            <View style={p.menuCard}>
-              {group.items.map((item, i) => (
-                <React.Fragment key={item.label}>
-                  {i > 0 && <View style={p.menuDivider} />}
-                  <Pressable
-                    style={({ pressed }) => [p.menuRow, pressed && { backgroundColor: '#FAFBFF' }]}
-                  >
-                    <View style={[p.menuIcon, { backgroundColor: `${item.color}12` }]}>
-                      <Ionicons name={item.icon as any} size={19} color={item.color} />
-                    </View>
-                    <Text style={p.menuLabel}>{item.label}</Text>
-                    <View style={{ flex: 1 }} />
-                    {item.badge && (
-                      <View style={[p.menuBadge, {
-                        backgroundColor: item.badge === 'ON' ? '#ECFDF5' : '#F1F5F9',
-                      }]}>
-                        <Text style={[p.menuBadgeTxt, {
-                          color: item.badge === 'ON' ? '#059669' : '#64748B',
-                        }]}>{item.badge}</Text>
-                      </View>
-                    )}
-                    <MaterialIcons name="chevron-right" size={20} color="#E2E8F0" style={{ marginLeft: 8 }} />
-                  </Pressable>
-                </React.Fragment>
-              ))}
+        {/* ── Bio Section ── */}
+        <Animated.View entering={FadeInDown.delay(500).duration(800)} style={[styles.section, shadows.sm, { marginTop: 15 }]}>
+          <View style={styles.secHeader}>
+            <View style={styles.secTitleRow}>
+              <Info size={18} color={colors.primaryBlue} />
+              <Text style={styles.secTitle}>About Me</Text>
+            </View>
+            <Pressable onPress={() => { setBioInput(bio); setEditBioModal(true); }}
+              style={styles.editBtn}>
+              <Edit3 size={14} color={colors.primaryBlue} />
+              <Text style={styles.editBtnText}>Edit</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.bioText}>
+            {bio || 'No bio added yet. Write something about your teaching philosophy or role.'}
+          </Text>
+        </Animated.View>
+
+        {/* ── Account Details ── */}
+        <Animated.View entering={FadeInDown.delay(600).duration(800)} style={[styles.section, shadows.sm]}>
+          <View style={styles.secHeader}>
+            <View style={styles.secTitleRow}>
+              <User size={18} color={colors.primaryBlue} />
+              <Text style={styles.secTitle}>Faculty Details</Text>
             </View>
           </View>
-        ))}
-
-        {/* ── LOGOUT ── */}
-        <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-          <Pressable
-            style={({ pressed }) => [p.logoutBtn, pressed && { opacity: 0.9 }]}
-            onPress={handleLogout}
-          >
-            <View style={p.logoutIconWrap}>
-              <MaterialIcons name="logout" size={20} color="#EF4444" />
+          {[
+            { icon: IdCard, label: 'Staff ID', value: staffId },
+            { icon: User, label: 'Full Name', value: user?.name || '—' },
+            { icon: Mail, label: 'Email Address', value: user?.email || '—' },
+            { icon: School, label: 'Department', value: user?.department || '—' },
+          ].map((row, i, arr) => (
+            <View key={row.label} style={[styles.detailRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}>
+              <View style={styles.detailIcon}>
+                <row.icon size={18} color="#64748B" />
+              </View>
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>{row.label}</Text>
+                <Text style={styles.detailValue}>{row.value}</Text>
+              </View>
             </View>
-            <Text style={p.logoutTxt}>Sign Out</Text>
+          ))}
+        </Animated.View>
+
+        {/* ── Logout ── */}
+        <Animated.View entering={FadeInDown.delay(800).duration(800)}>
+          <Pressable onPress={handleLogout} style={[styles.logoutBtn, shadows.sm]}>
+            <LogOut size={20} color="#EF4444" />
+            <Text style={styles.logoutTxt}>Sign Out</Text>
           </Pressable>
-        </View>
+        </Animated.View>
 
-        {/* Version */}
-        <Text style={p.version}>MIDNIGHT SCHOLAR V4.2.0-ALPHA</Text>
+        <Text style={styles.version}>VERSION 4.2.0 • ACADEMIC PORTAL</Text>
+        <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Edit Bio Modal */}
+      <Modal visible={editBioModal} animationType="fade" transparent>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <Pressable style={styles.overlayBg} onPress={() => setEditBioModal(false)} />
+          <View style={[styles.modalContent, shadows.premium]}>
+            <Text style={styles.modalTitle}>Edit About Me</Text>
+            <TextInput
+              style={styles.bioInput}
+              multiline
+              numberOfLines={4}
+              placeholder="Tell us about yourself..."
+              value={bioInput}
+              onChangeText={setBioInput}
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <Pressable onPress={() => setEditBioModal(false)} style={styles.cancelBtn}>
+                <Text style={styles.cancelTxt}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={saveBio} style={styles.saveBtn} disabled={savingBio}>
+                {savingBio ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveTxt}>Save Changes</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
 
-function InfoCard({
-  icon, iconColor, iconBg, label, value,
-}: { icon: string; iconColor: string; iconBg: string; label: string; value: string }) {
-  return (
-    <View style={ic.card}>
-      <View style={[ic.icon, { backgroundColor: iconBg }]}>
-        <MaterialIcons name={icon as any} size={18} color={iconColor} />
-      </View>
-      <View style={ic.content}>
-        <Text style={ic.label}>{label}</Text>
-        <Text style={ic.value}>{value}</Text>
-      </View>
-      <MaterialIcons name="chevron-right" size={18} color="#E2E8F0" />
-    </View>
-  );
-}
-const ic = StyleSheet.create({
-  card: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    backgroundColor: '#FFF', borderRadius: 16,
-    padding: 14, marginBottom: 8,
-    shadowColor: '#4F46E5', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#F8FAFC' },
+  body: { paddingBottom: 40 },
+  profileHeader: {
+    paddingBottom: 80,
+    alignItems: 'center',
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
   },
-  icon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  content: { flex: 1 },
-  label: { fontSize: 9, fontWeight: '800', color: '#94A3B8', letterSpacing: 0.8, marginBottom: 3 },
-  value: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
-});
-
-const p = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F5F7FF' },
-
-  // Hero
-  hero: { paddingBottom: 24, paddingHorizontal: 20, overflow: 'hidden' },
-  heroBlob: {
-    position: 'absolute', width: 240, height: 240, borderRadius: 120,
-    backgroundColor: 'rgba(99,102,241,0.12)', top: -60, right: -60,
+  avatarGroup: { marginBottom: spacing.md },
+  avatarContainer: {
+    width: 110, height: 110, borderRadius: 55,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center', alignItems: 'center', padding: 4,
   },
-  heroTopBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24,
+  avatarMain: {
+    width: '100%', height: '100%', borderRadius: 52,
+    backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center',
+    borderWidth: 3, borderColor: '#FFF',
   },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  brandIcon: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center', alignItems: 'center',
+  avatarLetters: { fontSize: 36, fontWeight: '900', color: '#FFF' },
+  cameraPill: {
+    position: 'absolute', bottom: 4, right: 4,
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.primaryBlue, justifyContent: 'center', alignItems: 'center',
+    borderWidth: 3, borderColor: '#FFF',
   },
-  brandName: { fontSize: 15, fontWeight: '800', color: '#FFF', letterSpacing: 0.3 },
-  bellBtn: {
-    width: 38, height: 38, borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center', alignItems: 'center',
-  },
-
-  avatarSection: { alignItems: 'center', marginBottom: 20 },
-  avatarWrapper: {
-    position: 'relative',
-    marginBottom: 12,
-  },
-  avatarRing: {
-    width: 96, height: 96, borderRadius: 29,
-    padding: 3,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  avatarGrad: {
-    flex: 1, borderRadius: 26, justifyContent: 'center', alignItems: 'center',
-  },
-  avatarText: { fontSize: 34, fontWeight: '900', color: '#FFF' },
-  editDot: {
-    position: 'absolute', bottom: -4, right: -4,
-    width: 26, height: 26, borderRadius: 9,
-    backgroundColor: '#4F46E5', borderWidth: 2.5, borderColor: '#FFF',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  userName: { fontSize: 22, fontWeight: '900', color: '#FFF', marginBottom: 8, letterSpacing: -0.3 },
-  rolePill: {
+  profileMeta: { alignItems: 'center', gap: 6 },
+  userName: { fontSize: 26, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 },
+  proBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(52,211,153,0.15)',
-    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6,
-    borderWidth: 1, borderColor: 'rgba(52,211,153,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20,
   },
-  roleDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#34D399' },
-  roleTxt: { fontSize: 10, fontWeight: '800', color: '#34D399', letterSpacing: 1 },
+  proBadgeText: { fontSize: 12, fontWeight: '800', color: '#FFF' },
+  userEmail: { fontSize: 14, color: 'rgba(255,255,255,0.7)', fontWeight: '500' },
+  
+  statsPanel: {
+    flexDirection: 'row', backgroundColor: '#FFF',
+    marginHorizontal: spacing.xl, borderRadius: 24,
+    padding: 20, marginTop: -45,
+    justifyContent: 'space-between', alignItems: 'center',
+  },
+  statCell: { flex: 1, alignItems: 'center', gap: 8 },
+  statIconCircle: { width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  statNumber: { fontSize: 18, fontWeight: '900', color: '#1E293B' },
+  statDescription: { fontSize: 9, fontWeight: '800', color: '#64748B', letterSpacing: 0.5, textTransform: 'uppercase' },
+  statDivider: { borderRightWidth: 1, borderRightColor: '#F1F5F9' },
 
-  statsStrip: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 18, padding: 16,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+  section: {
+    backgroundColor: '#FFF', marginHorizontal: spacing.lg,
+    borderRadius: 24, padding: 20, marginBottom: 15,
+    borderWidth: 1, borderColor: '#F1F5F9',
   },
-  statItem: { flex: 1, alignItems: 'center', gap: 4 },
-  statDiv: { width: 1, backgroundColor: 'rgba(255,255,255,0.12)' },
-  statVal: { fontSize: 14, fontWeight: '800', color: '#FFF' },
-  statLbl: { fontSize: 9, color: 'rgba(255,255,255,0.4)', fontWeight: '700', letterSpacing: 0.8 },
+  secHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  secTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  secTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  editBtnText: { fontSize: 13, fontWeight: '700', color: colors.primaryBlue },
+  bioText: { fontSize: 14, color: '#475569', lineHeight: 22 },
 
-  // Info group
-  infoGroup: { paddingHorizontal: 16, marginTop: 16 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  detailIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  detailContent: { flex: 1 },
+  detailLabel: { fontSize: 11, color: '#64748B', fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
+  detailValue: { fontSize: 14, color: '#1E293B', fontWeight: '600' },
 
-  // Menu groups
-  menuGroup: { paddingHorizontal: 16, marginTop: 20 },
-  menuGroupLabel: {
-    fontSize: 10, fontWeight: '800', color: '#94A3B8',
-    letterSpacing: 1.2, marginBottom: 8, marginLeft: 4,
-  },
-  menuCard: {
-    backgroundColor: '#FFF', borderRadius: 20, overflow: 'hidden',
-    shadowColor: '#4F46E5', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
-  },
-  menuRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: 16, gap: 14,
-  },
-  menuIcon: { width: 38, height: 38, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
-  menuLabel: { fontSize: 15, fontWeight: '600', color: '#0F172A' },
-  menuDivider: { height: 1, backgroundColor: '#F8FAFF', marginHorizontal: 16 },
-  menuBadge: {
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
-  },
-  menuBadgeTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
-
-  // Logout
   logoutBtn: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#FEF2F2', borderRadius: 18,
-    paddingVertical: 14, paddingHorizontal: 20, gap: 14,
-    borderWidth: 1, borderColor: '#FECACA',
-  },
-  logoutIconWrap: {
-    width: 38, height: 38, borderRadius: 11,
-    backgroundColor: '#FEE2E2', justifyContent: 'center', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, backgroundColor: '#FFF', marginHorizontal: spacing.lg,
+    paddingVertical: 18, borderRadius: 24, marginTop: 10,
+    borderWidth: 1, borderColor: '#FEE2E2',
   },
   logoutTxt: { fontSize: 16, fontWeight: '800', color: '#EF4444' },
+  version: { textAlign: 'center', marginTop: 24, fontSize: 10, color: '#94A3B8', fontWeight: '700', letterSpacing: 1 },
 
-  version: {
-    textAlign: 'center', fontSize: 9, color: '#CBD5E1',
-    fontWeight: '700', letterSpacing: 1.2, marginTop: 20,
+  modalOverlay: { flex: 1, justifyContent: 'center', padding: 20 },
+  overlayBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.4)' },
+  modalContent: { backgroundColor: '#FFF', borderRadius: 28, padding: 24, gap: 16 },
+  modalTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A' },
+  bioInput: {
+    backgroundColor: '#F8FAFC', borderRadius: 16, padding: 16,
+    fontSize: 15, color: '#1E293B', height: 120, textAlignVertical: 'top',
+    borderWidth: 1, borderColor: '#E2E8F0',
   },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  cancelBtn: { flex: 1, height: 50, borderRadius: 16, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  saveBtn: { flex: 2, height: 50, borderRadius: 16, backgroundColor: colors.primaryBlue, justifyContent: 'center', alignItems: 'center' },
+  cancelTxt: { fontSize: 15, fontWeight: '700', color: '#64748B' },
+  saveTxt: { fontSize: 15, fontWeight: '800', color: '#FFF' },
 });

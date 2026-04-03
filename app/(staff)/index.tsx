@@ -10,34 +10,37 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, G, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import { useAuth } from '../../hooks/useAuth';
 import { dataService, ClassData } from '../../services/dataService';
-import { shadows } from '../../constants/theme';
+import { shadows, gradients } from '../../constants/theme';
 
 // screen width available if needed for future layout calculations
 
 // ── Premium SVG Circular Gauge ──────────────────────────────────
-function CircleGauge({ pct, size = 130 }: { pct: number; size?: number }) {
-  const strokeWidth = 11;
+function CircleGauge({ pct, size = 150 }: { pct: number; size?: number }) {
+  const strokeWidth = 10;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (pct / 100) * circumference;
-  const ringColor = pct >= 80 ? '#34D399' : pct >= 60 ? '#FBBF24' : '#F87171';
+  
+  // Vibrant gradients based on rate
+  const color1 = pct >= 80 ? '#10B981' : pct >= 60 ? '#F59E0B' : '#EF4444';
+  const color2 = pct >= 80 ? '#34D399' : pct >= 60 ? '#FBBF24' : '#F87171';
 
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={size} height={size}>
         <Defs>
           <SvgLinearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <Stop offset="0%" stopColor={ringColor} stopOpacity="1" />
-            <Stop offset="100%" stopColor={pct >= 80 ? '#059669' : pct >= 60 ? '#D97706' : '#DC2626'} stopOpacity="1" />
+            <Stop offset="0%" stopColor={color1} stopOpacity="1" />
+            <Stop offset="100%" stopColor={color2} stopOpacity="1" />
           </SvgLinearGradient>
         </Defs>
         <G rotation="-90" origin={`${size / 2}, ${size / 2}`}>
-          {/* Track */}
+          {/* Background Track with subtle glow */}
           <Circle
             cx={size / 2} cy={size / 2} r={radius}
-            stroke="rgba(255,255,255,0.08)" strokeWidth={strokeWidth} fill="none"
+            stroke="rgba(255,255,255,0.06)" strokeWidth={strokeWidth} fill="none"
           />
-          {/* Progress */}
+          {/* Main Progress Ring */}
           <Circle
             cx={size / 2} cy={size / 2} r={radius}
             stroke="url(#gaugeGrad)" strokeWidth={strokeWidth}
@@ -46,18 +49,12 @@ function CircleGauge({ pct, size = 130 }: { pct: number; size?: number }) {
           />
         </G>
       </Svg>
-      {/* Center text */}
+      {/* Center text with professional spacing */}
       <View style={{ position: 'absolute', alignItems: 'center' }}>
-        <Text style={{ fontSize: 28, fontWeight: '900', color: '#FFF', letterSpacing: -1 }}>{pct}%</Text>
-        <Text style={{ fontSize: 8, color: 'rgba(255,255,255,0.5)', fontWeight: '700', letterSpacing: 1.2 }}>
-          ATTENDANCE
+        <Text style={{ fontSize: 36, fontWeight: '900', color: '#FFF', letterSpacing: -1.5 }}>{pct}%</Text>
+        <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', fontWeight: '800', letterSpacing: 0.8, marginTop: -2 }}>
+          AVG ATTENDANCE
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
-          <MaterialIcons name="trending-up" size={10} color="#34D399" />
-          <Text style={{ fontSize: 8, color: '#34D399', fontWeight: '700', marginLeft: 2, letterSpacing: 0.8 }}>
-            THIS WEEK
-          </Text>
-        </View>
       </View>
     </View>
   );
@@ -118,7 +115,7 @@ export default function StaffHome() {
         subsRef.current.forEach(s => s.unsubscribe());
         subsRef.current = [];
       };
-    }, [user, loadData])
+    }, [user, loadData, authLoading])
   );
 
   const today = new Date();
@@ -152,59 +149,45 @@ export default function StaffHome() {
     );
   }
 
-  const attendanceStatusColor = avgAttRate >= 80 ? '#10B981' : avgAttRate >= 60 ? '#F59E0B' : '#EF4444';
+
 
   return (
     <View style={s.root}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
 
-        {/* ── HERO HEADER ── */}
+        {/* ── PROFESSIONAL LIGHT BLUE HEADER ── */}
         <LinearGradient
-          colors={['#060D1F', '#0E1F45', '#132555']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={[s.header, { paddingTop: insets.top + 16 }]}
+          colors={gradients.premium as any}
+          style={[s.header, { paddingTop: insets.top + 8 }]}
         >
-          {/* Decorative blobs */}
-          <View style={s.blob1} />
-          <View style={s.blob2} />
-
-          {/* Top bar */}
-          <View style={s.topBar}>
-            <View style={s.brandRow}>
-              <View style={s.brandIcon}>
-                <MaterialIcons name="school" size={18} color="#FFF" />
-              </View>
-              <Text style={s.brandName}>Midnight Scholar</Text>
+          {/* Greeting Row with date opposite */}
+          <View style={s.greetingRow}>
+            <View style={s.greetingBlock}>
+              <Text style={s.greeting}>{greeting},</Text>
+              <Text style={s.greetingName}>{firstName} 👋</Text>
             </View>
-
-          </View>
-
-          {/* Greeting */}
-          <View style={s.greetingBlock}>
             <Text style={s.dateLabel}>{dateStr.toUpperCase()}</Text>
-            <Text style={s.greeting}>{greeting},</Text>
-            <Text style={s.greetingName}>{firstName} 👋</Text>
           </View>
 
           {/* Stats cards row */}
           <View style={s.statsRow}>
             {/* Gauge card */}
             <View style={s.gaugeCard}>
-              <CircleGauge pct={avgAttRate} size={124} />
+              <CircleGauge pct={avgAttRate} size={145} />
             </View>
 
             {/* Right mini tiles */}
             <View style={s.miniCol}>
               <View style={s.miniCard}>
-                <View style={[s.miniIconBg, { backgroundColor: 'rgba(99,102,241,0.2)' }]}>
-                  <Ionicons name="school-outline" size={16} color="#818CF8" />
+                <View style={[s.miniIconBg, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
+                  <Ionicons name="school" size={16} color="#FFF" />
                 </View>
                 <Text style={s.miniVal}>{myClasses.length}</Text>
                 <Text style={s.miniLbl}>CLASSES</Text>
               </View>
               <View style={s.miniCard}>
-                <View style={[s.miniIconBg, { backgroundColor: 'rgba(251,191,36,0.18)' }]}>
-                  <MaterialIcons name="people" size={16} color="#FBBF24" />
+                <View style={[s.miniIconBg, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
+                  <MaterialIcons name="people" size={16} color="#FFF" />
                 </View>
                 <Text style={s.miniVal}>{totalStudents}</Text>
                 <Text style={s.miniLbl}>STUDENTS</Text>
@@ -214,14 +197,14 @@ export default function StaffHome() {
 
           {/* Attendance status pill */}
           <View style={s.statusPillRow}>
-            <View style={[s.statusPill, { backgroundColor: `${attendanceStatusColor}20`, borderColor: `${attendanceStatusColor}40` }]}>
-              <View style={[s.statusDot, { backgroundColor: attendanceStatusColor }]} />
-              <Text style={[s.statusTxt, { color: attendanceStatusColor }]}>
-                {avgAttRate >= 80 ? 'Excellent Attendance' : avgAttRate >= 60 ? 'Moderate Attendance' : 'Needs Improvement'}
+            <View style={[s.statusPill, { backgroundColor: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.2)' }]}>
+              <View style={[s.statusDot, { backgroundColor: '#34D399' }]} />
+              <Text style={[s.statusTxt, { color: '#FFF' }]}>
+                {avgAttRate >= 80 ? 'Excellent Performance' : avgAttRate >= 60 ? 'Moderate Performance' : 'Attention Needed'}
               </Text>
             </View>
             <Pressable onPress={() => router.push('/(staff)/attendance' as any)}>
-              <Text style={s.viewCalLink}>VIEW CALENDAR →</Text>
+              <Text style={s.viewCalLink}>CALENDAR →</Text>
             </Pressable>
           </View>
         </LinearGradient>
@@ -345,21 +328,23 @@ export default function StaffHome() {
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F5F7FF' },
+  root: { flex: 1, backgroundColor: '#F8FAFC' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F7FF' },
 
   // ── Hero Header ──
   header: {
-    paddingBottom: 28, paddingHorizontal: 20,
+    paddingBottom: 40, paddingHorizontal: 20,
     overflow: 'hidden',
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
   },
   blob1: {
     position: 'absolute', width: 200, height: 200, borderRadius: 100,
-    backgroundColor: 'rgba(99,102,241,0.12)', top: -60, right: -40,
+    backgroundColor: 'rgba(255,255,255,0.08)', top: -60, right: -40,
   },
   blob2: {
     position: 'absolute', width: 150, height: 150, borderRadius: 75,
-    backgroundColor: 'rgba(37,99,235,0.10)', bottom: 0, left: -30,
+    backgroundColor: 'rgba(255,255,255,0.05)', bottom: 0, left: -30,
   },
   topBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22,
@@ -382,9 +367,16 @@ const s = StyleSheet.create({
     backgroundColor: '#EF4444', borderWidth: 1.5, borderColor: '#060D1F',
   },
 
-  greetingBlock: { marginBottom: 20 },
-  dateLabel: { fontSize: 11, color: '#6366F1', fontWeight: '700', letterSpacing: 1.5, marginBottom: 4 },
-  greeting: { fontSize: 20, fontWeight: '400', color: 'rgba(255,255,255,0.7)' },
+  greetingRow: { 
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+    marginBottom: 20, marginTop: 4,
+  },
+  greetingBlock: { flex: 1 },
+  dateLabel: { 
+    fontSize: 9, color: 'rgba(255,255,255,0.6)', fontWeight: '800', 
+    letterSpacing: 1, marginTop: 8 
+  },
+  greeting: { fontSize: 18, fontWeight: '400', color: 'rgba(255,255,255,0.8)' },
   greetingName: { fontSize: 28, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 },
 
   statsRow: { flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 16 },
@@ -409,7 +401,7 @@ const s = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginBottom: 2,
   },
   miniVal: { fontSize: 22, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 },
-  miniLbl: { fontSize: 8, color: 'rgba(255,255,255,0.45)', fontWeight: '700', letterSpacing: 1.2 },
+  miniLbl: { fontSize: 8, color: 'rgba(255,255,255,0.6)', fontWeight: '800', letterSpacing: 1.2 },
 
   statusPillRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -421,7 +413,7 @@ const s = StyleSheet.create({
   },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusTxt: { fontSize: 11, fontWeight: '700' },
-  viewCalLink: { fontSize: 10, color: '#818CF8', fontWeight: '800', letterSpacing: 1 },
+  viewCalLink: { fontSize: 10, color: 'rgba(255,255,255,0.8)', fontWeight: '800', letterSpacing: 1 },
 
   // ── Quick Actions ──
   sectionWrap: { paddingHorizontal: 16, marginTop: 20 },

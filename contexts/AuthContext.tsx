@@ -9,6 +9,7 @@ interface AuthContextType {
   signup: (email: string, password: string, name: string, role: UserRole, department?: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfileImage: (imageUri: string | null) => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -18,10 +19,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadUser();
+    refreshUser();
   }, []);
 
-  const loadUser = async () => {
+  const refreshUser = async () => {
     try {
       setLoading(true);
       // Wait for Supabase to recover session first
@@ -67,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, updateProfileImage }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, updateProfileImage, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

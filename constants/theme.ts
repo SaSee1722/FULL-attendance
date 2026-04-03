@@ -1,5 +1,5 @@
 export const colors = {
-  // Midnight Scholar Core Palette
+  // Core Brand Palette
   navyDeep: '#0a192f',
   primaryBlue: '#1152d4',
   pureWhite: '#ffffff',
@@ -49,17 +49,24 @@ export const colors = {
   unapprovedLight: '#fef3c7',
 
   // Glassmorphism supports
-  glassWhite: 'rgba(255, 255, 255, 0.2)',
-  glassDark: 'rgba(10, 25, 47, 0.05)',
+  glassWhite: 'rgba(255, 255, 255, 0.15)',
+  glassDark: 'rgba(10, 25, 47, 0.1)',
   overlay: 'rgba(10, 25, 47, 0.4)',
+  
+  // Custom Gradients for Stats
+  gradientBlue: ['#4F7FFF', '#2563EB'],
+  gradientGreen: ['#34D399', '#10B981'],
+  gradientRed: ['#F87171', '#EF4444'],
+  gradientOrange: ['#FBBF24', '#F59E0B'],
 };
 
 export const gradients = {
   admin: [colors.admin, colors.adminDark],
-  dean: [colors.dean, colors.deanDark],
-  staff: [colors.staff, colors.staffDark],
+  dean: ['#0F172A', '#1E293B'],
+  staff: ['#1152D4', '#0E41A9'],
   surface: ['#FFFFFF', '#F8FAFC'],
   glass: ['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.05)'],
+  premium: ['#0F172A', '#111827', '#1E293B'],
 };
 
 export const spacing = {

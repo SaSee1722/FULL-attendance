@@ -47,20 +47,48 @@ export interface AttendanceRecord {
   timestamp: string;
 }
 
+// ── Fast Cache Implementation ────────────────────────────────────
+interface CacheEntry { data: any; expiry: number; }
+const memoryCache: Record<string, CacheEntry> = {};
+const CACHE_TTL = 3000; // 3 seconds memoization for hot paths
+
+function getCached(key: string) {
+  const entry = memoryCache[key];
+  if (entry && entry.expiry > Date.now()) return entry.data;
+  return null;
+}
+function setCache(key: string, data: any) {
+  memoryCache[key] = { data, expiry: Date.now() + CACHE_TTL };
+}
+
 export const dataService = {
+  // Clear cache if needed (e.g. after write ops)
+  clearCache() { 
+    Object.keys(memoryCache).forEach(k => delete memoryCache[k]); 
+  },
   // ── Profiles ───────────────────────────────────────────────────
   async getCurrentProfile(): Promise<Profile | null> {
+    const cacheKey = 'current_profile';
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        // Fallback to getSession for better resilience in low-network areas
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user) return null;
-        const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-        return data || null;
-      }
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-      return data || null;
+      // Prefer getSession for instant local session retrieval
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      
+      if (!user) return null;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+      
+      if (error || !data) return null;
+
+      setCache(cacheKey, data);
+      return data;
     } catch (e) { 
       console.error('getCurrentProfile error:', e);
       return null; 
@@ -69,6 +97,10 @@ export const dataService = {
 
   // ── Classes ────────────────────────────────────────────────────
   async getClasses(): Promise<ClassData[]> {
+    const cacheKey = 'classes_list';
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     try {
       const profile = await this.getCurrentProfile();
       if (!profile) return [];
@@ -97,7 +129,7 @@ export const dataService = {
         }
       });
 
-      return filtered.map(c => ({
+      const res = filtered.map(c => ({
         id: c.id,
         name: c.name,
         department: c.department,
@@ -108,6 +140,8 @@ export const dataService = {
         studentCount: c.student_count || 0,
         attendanceRate: c.attendance_rate || 0
       }));
+      setCache(cacheKey, res);
+      return res;
     } catch { return []; }
   },
 
@@ -279,6 +313,16 @@ export const dataService = {
         console.error('Supabase upsert error:', error);
         throw error;
       }
+      
+      this.clearCache(); // Invalidate on write
+
+      // Recompute rates after success
+      const studentIds = records.map(r => r.studentId).filter(Boolean) as string[];
+      if (studentIds.length > 0) {
+        this.recomputeStudentsAttendance(studentIds).catch(e => 
+          console.error('Recompute rates failed partly:', e)
+        );
+      }
 
       // Log activity asynchronously
       this.getCurrentProfile().then(p => {
@@ -296,6 +340,32 @@ export const dataService = {
     } catch (e) {
       console.error('markAttendance full failure:', e);
       throw e;
+    }
+  },
+
+  async recomputeStudentsAttendance(studentIds: string[]) {
+    try {
+      const uniqueIds = Array.from(new Set(studentIds));
+      // Fetch count of absent/unapproved days for these students
+      const { data: records } = await supabase
+        .from('attendance_records')
+        .select('student_id')
+        .in('student_id', uniqueIds)
+        .in('status', ['absent', 'unapproved']);
+
+      const counts: Record<string, number> = {};
+      uniqueIds.forEach(id => counts[id] = 0);
+      records?.forEach((r: any) => {
+        if (counts[r.student_id] !== undefined) counts[r.student_id]++;
+      });
+
+      // Update all students in parallel
+      await Promise.all(uniqueIds.map(id => {
+        const rate = Math.max(0, 100 - (counts[id] * 3));
+        return supabase.from('students').update({ attendance_rate: rate }).eq('id', id);
+      }));
+    } catch (e) {
+      console.error('recomputeStudentsAttendance failure:', e);
     }
   },
 
@@ -375,15 +445,14 @@ export const dataService = {
 
   // ── Statistics ────────────────────────────────────────────────
   async getStatistics() {
+    const cacheKey = 'stats';
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     const defaultStats = {
-      totalClasses: 0,
-      totalStudents: 0,
-      totalStaff: 0,
-      avgAttendance: 0,
-      averageAttendance: 0,
-      presentToday: 0,
-      absentToday: 0,
-      onDutyToday: 0,
+      totalClasses: 0, totalStudents: 0, totalStaff: 0,
+      avgAttendance: 0, averageAttendance: 0,
+      presentToday: 0, absentToday: 0, onDutyToday: 0,
       department: ''
     };
 
@@ -391,8 +460,12 @@ export const dataService = {
       const profile = await this.getCurrentProfile();
       if (!profile) return defaultStats;
 
-      // Fetch all classes first to filter them locally for consistency
-      const { data: allClasses } = await supabase.from('classes').select('*');
+      // Single fetch for all needed data to minimize round-trips
+      const [{ data: allClasses }, { data: allProfiles }] = await Promise.all([
+        supabase.from('classes').select('*'),
+        supabase.from('profiles').select('id, department').eq('role', 'staff')
+      ]);
+
       if (!allClasses) return defaultStats;
 
       let filteredClasses;
@@ -403,12 +476,11 @@ export const dataService = {
       }
 
       const totalStudents = filteredClasses.reduce((acc, c) => acc + (c.student_count || 0), 0);
-      const avg = filteredClasses.reduce((acc, c) => acc + (c.attendance_rate || 0), 0) / filteredClasses.length;
+      const avg = filteredClasses.length 
+        ? filteredClasses.reduce((acc, c) => acc + (c.attendance_rate || 0), 0) / filteredClasses.length
+        : 0;
 
-      // Fetch All Staff count (including pending/non-verified)
-      const { data: allProfiles } = await supabase.from('profiles').select('role, department').eq('role', 'staff');
       const filteredStaff = (allProfiles || []).filter(p => this.matchesDepartment(p.department, profile.department));
-      const totalStaff = filteredStaff.length;
 
       const today = new Date().toISOString().split('T')[0];
       const { data: records } = await supabase
@@ -419,16 +491,17 @@ export const dataService = {
 
       const counts = { present: 0, absent: 0, od: 0 };
       records?.forEach(r => {
-        if (r.status === 'present') counts.present++;
-        else if (r.status === 'absent' || r.status === 'unapproved') counts.absent++;
-        else if (r.status === 'on-duty') counts.od++;
+        const stat = (r.status || '').toLowerCase().trim();
+        if (stat === 'present') counts.present++;
+        else if (stat === 'absent' || stat === 'unapproved') counts.absent++;
+        else if (stat === 'on-duty') counts.od++;
       });
 
-      return {
+      const res = {
         ...defaultStats,
         totalClasses: filteredClasses.length,
         totalStudents,
-        totalStaff,
+        totalStaff: filteredStaff.length,
         avgAttendance: Math.round(avg),
         averageAttendance: Math.round(avg),
         presentToday: counts.present,
@@ -436,6 +509,8 @@ export const dataService = {
         onDutyToday: counts.od,
         department: profile.department
       };
+      setCache(cacheKey, res);
+      return res;
     } catch (e) { 
       console.error('getStatistics error:', e);
       return defaultStats; 
@@ -443,19 +518,18 @@ export const dataService = {
   },
 
   async getAttendanceLogs(limit: number = 200) {
+    const cacheKey = `logs-${limit}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     try {
       const profile = await this.getCurrentProfile();
       if (!profile) return [];
 
-      // Fetch records with classes joined
       const { data, error } = await supabase
         .from('attendance_records')
         .select(`
-          status,
-          date,
-          marked_by,
-          timestamp,
-          class_id,
+          status, date, marked_by, timestamp, class_id,
           classes:class_id (name, department, advisor),
           profiles:marked_by (name)
         `)
@@ -464,70 +538,43 @@ export const dataService = {
 
       if (error) throw error;
 
-      // Group by (date + class_id) to create "sessions"
       const sessionsMap: Record<string, any> = {};
-
       data?.forEach(r => {
         const cls = r.classes as any;
         const prof = r.profiles as any;
-        
-        if (cls?.department !== profile.department && profile.role === 'dean') return;
+        const dept = cls?.department || '';
+        const profileDept = profile.department || '';
+        if (profile.role === 'dean' && !this.matchesDepartment(dept, profileDept)) return;
         
         const key = `${r.date}_${r.class_id}`;
         if (!sessionsMap[key]) {
           sessionsMap[key] = {
-            id: key,
-            classId: r.class_id,
-            className: cls?.name || 'Unknown Class',
-            advisor: cls?.advisor,
-            date: r.date,
-            markedBy: prof?.name || 'System',
-            timestamp: r.timestamp,
-            present: 0,
-            absent: 0,
-            onDuty: 0,
-            totalStudents: 0
+            id: key, classId: r.class_id, className: cls?.name || 'Unknown',
+            advisor: cls?.advisor, date: r.date, markedBy: prof?.name || 'System',
+            timestamp: r.timestamp, present: 0, absent: 0, onDuty: 0, totalStudents: 0
           };
         }
-        
+
+        const stat = (r.status || '').toLowerCase().trim();
         sessionsMap[key].totalStudents++;
-        if (r.status === 'present') sessionsMap[key].present++;
-        else if (r.status === 'absent' || r.status === 'unapproved') sessionsMap[key].absent++;
-        else if (r.status === 'on-duty') sessionsMap[key].onDuty++;
+        if (stat === 'present') sessionsMap[key].present++;
+        else if (stat === 'absent' || stat === 'unapproved') sessionsMap[key].absent++;
+        else if (stat === 'on-duty') sessionsMap[key].onDuty++;
       });
 
       const sessions = Object.values(sessionsMap);
-      
-      // Fetch Advisor Images for these sessions
       const advisorNames = [...new Set(sessions.map(s => s.advisor).filter(Boolean))];
       if (advisorNames.length > 0) {
-        const { data: advisorProfiles } = await supabase
-          .from('profiles')
-          .select('name, profile_image')
-          .in('name', advisorNames.map(n => n.trim()));
-        
+        const { data: ads } = await supabase.from('profiles').select('name, profile_image').in('name', advisorNames);
         const imgMap: Record<string, string> = {};
-        advisorProfiles?.forEach(ap => { 
-          if (ap.name && ap.profile_image) {
-            imgMap[ap.name.trim().toLowerCase()] = ap.profile_image; 
-          }
-        });
-        
-        sessions.forEach(s => {
-          if (s.advisor) {
-            const trimmedLower = s.advisor.trim().toLowerCase();
-            if (imgMap[trimmedLower]) s.advisorImage = imgMap[trimmedLower];
-          }
-        });
+        ads?.forEach(ap => { if (ap.name && ap.profile_image) imgMap[ap.name.trim().toLowerCase()] = ap.profile_image; });
+        sessions.forEach(s => { if (s.advisor) s.advisorImage = imgMap[s.advisor.trim().toLowerCase()]; });
       }
 
-      return sessions.sort((a,b) => 
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-    } catch (e) {
-      console.error('getAttendanceLogs error:', e);
-      return [];
-    }
+      const res = sessions.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setCache(cacheKey, res);
+      return res;
+    } catch { return []; }
   },
 
   async getRecentActivity(limit = 5) {
@@ -559,9 +606,29 @@ export const dataService = {
 
   // ── Reports & Analytics ──────────────────────────────────────────
   async getWeeklyAttendanceTrend(days = 7): Promise<any[]> {
+    const cacheKey = `weekly-${days}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     try {
       const profile = await this.getCurrentProfile();
       if (!profile) return [];
+
+      // Fetch classes once
+      const classes = await dataService.getClasses();
+      const classIds = classes.map((c: ClassData) => c.id);
+      if (classIds.length === 0) return [];
+
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - (days - 1));
+      const startStr = startDate.toISOString().split('T')[0];
+
+      // Single query for ALL weekly records
+      const { data: allRecords } = await supabase
+        .from('attendance_records')
+        .select('date, status')
+        .in('class_id', classIds)
+        .gte('date', startStr);
 
       const result = [];
       for (let i = days - 1; i >= 0; i--) {
@@ -569,48 +636,37 @@ export const dataService = {
         d.setDate(d.getDate() - i);
         const dateStr = d.toISOString().split('T')[0];
         
-        // Fetch all classes for this department
-        let query = supabase.from('classes').select('id');
-        if (profile.role === 'dean') {
-          query = query.eq('department', profile.department);
+        const dayRecords = allRecords?.filter(r => r.date === dateStr) || [];
+
+        if (dayRecords.length === 0) {
+          result.push({ 
+            date: dateStr, 
+            dayLabel: d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(), 
+            rate: -1, present: 0, absent: 0, total: 0 
+          });
         } else {
-          query = query.eq('advisor', profile.name);
-        }
-        const { data: classes } = await query;
-        const classIds = classes?.map(c => c.id) || [];
-
-        if (classIds.length === 0) {
-          result.push({ date: dateStr, dayLabel: d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(), rate: -1, present: 0, absent: 0, total: 0 });
-          continue;
-        }
-
-        const { data: records } = await supabase
-          .from('attendance_records')
-          .select('status')
-          .eq('date', dateStr)
-          .in('class_id', classIds);
-
-        if (!records || records.length === 0) {
-          result.push({ date: dateStr, dayLabel: d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(), rate: -1, present: 0, absent: 0, total: 0 });
-        } else {
-          const present = records.filter(r => r.status === 'present' || r.status === 'on-duty').length;
-          const total = records.length;
-          const rate = Math.round((present / total) * 100);
+          const present = dayRecords.filter(r => r.status === 'present' || r.status === 'on-duty').length;
+          const total = dayRecords.length;
           result.push({
             date: dateStr,
             dayLabel: d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
-            rate,
+            rate: Math.round((present / total) * 100),
             present,
             absent: total - present,
             total
           });
         }
       }
+      setCache(cacheKey, result);
       return result;
     } catch { return []; }
   },
 
   async getClassAttendanceSummary(classIds: string[], fromDate: string): Promise<any> {
+    const cacheKey = `summary-${classIds.join('-')}-${fromDate}`;
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+
     try {
       const { data } = await supabase
         .from('attendance_records')
@@ -626,18 +682,18 @@ export const dataService = {
       data?.forEach(r => {
         if (!summary[r.class_id]) return;
         summary[r.class_id].total++;
-        if (r.status === 'present') summary[r.class_id].present++;
-        else if (r.status === 'absent' || r.status === 'unapproved') summary[r.class_id].absent++;
-        else if (r.status === 'on-duty') summary[r.class_id].onDuty++;
+        const stat = (r.status || '').toLowerCase().trim();
+        if (stat === 'present') summary[r.class_id].present++;
+        else if (stat === 'absent' || stat === 'unapproved') summary[r.class_id].absent++;
+        else if (stat === 'on-duty') summary[r.class_id].onDuty++;
       });
 
       Object.keys(summary).forEach(id => {
         const s = summary[id];
-        if (s.total > 0) {
-          s.rate = Math.round(((s.present + s.onDuty) / s.total) * 100);
-        }
+        if (s.total > 0) s.rate = Math.round(((s.present + s.onDuty) / s.total) * 100);
       });
 
+      setCache(cacheKey, summary);
       return summary;
     } catch { return {}; }
   },

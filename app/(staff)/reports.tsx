@@ -9,6 +9,7 @@ import { useFocusEffect } from 'expo-router';
 import Svg, { Circle, G, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import { useAuth } from '../../hooks/useAuth';
 import { dataService, ClassData } from '../../services/dataService';
+import { gradients } from '../../constants/theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -180,7 +181,6 @@ export default function StaffReports() {
   const [classSummary, setClassSummary] = useState<ClassSummary>({});
   const [logs, setLogs] = useState<any[]>([]);
   const [stats, setStats] = useState({ totalClasses: 0, totalStudents: 0, needAttention: 0 });
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const subsRef = useRef<{ unsubscribe: () => void }[]>([]);
 
@@ -202,9 +202,9 @@ export default function StaffReports() {
 
       // Fetch per-class real attendance summary
       if (cls.length > 0) {
-        // from 30 days ago
+        // from 14 days ago (optimized for speed)
         const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - 30);
+        fromDate.setDate(fromDate.getDate() - 14);
         const summary = await dataService.getClassAttendanceSummary(
           cls.map(c => c.id),
           fromDate.toISOString().split('T')[0]
@@ -228,7 +228,6 @@ export default function StaffReports() {
         setStats({ totalClasses: 0, totalStudents: 0, needAttention: 0 });
       }
 
-      setLastUpdated(new Date());
     } catch (e) {
       console.error('Reports loadAll error:', e);
     } finally {
@@ -261,7 +260,6 @@ export default function StaffReports() {
   };
 
   const sortedClasses = [...classes].sort((a, b) => getRealRate(b) - getRealRate(a));
-  const needAttentionList = classes.filter(c => getRealRate(c) < 80);
 
   const dateRange = trend.length > 0
     ? `${new Date(trend[0].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(trend[trend.length - 1].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
@@ -286,21 +284,17 @@ export default function StaffReports() {
     <View style={r.root}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
 
-        {/* ── HERO HEADER ── */}
+        {/* ── PROFESSIONAL HEADER ── */}
         <LinearGradient
-          colors={['#0F172A', '#1E1B4B', '#1E293B']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={[r.hero, { paddingTop: insets.top + 20 }]}
+          colors={gradients.premium as any}
+          style={[r.hero, { paddingTop: insets.top + 8 }]}
         >
-          <View style={r.heroBlob1} />
-          <View style={r.heroBlob2} />
-
           {/* Top row */}
           <View style={r.heroTopRow}>
             <View>
-              <Text style={r.heroLabel}>ACADEMIC OVERVIEW</Text>
-              <Text style={r.heroTitle}>Staff Reports</Text>
-              <Text style={r.heroSub}>{user?.department || 'Your Department'}</Text>
+              <Text style={r.heroLabel}>ADMINISTRATIVE INSIGHTS</Text>
+              <Text style={r.heroTitle}>Academic Reports</Text>
+              <Text style={r.heroSub}>{user?.department || 'Department Overview'}</Text>
             </View>
             <Pressable
               style={[r.refreshBtn, refreshing && { opacity: 0.6 }]}
@@ -308,65 +302,58 @@ export default function StaffReports() {
               disabled={refreshing}
             >
               {refreshing
-                ? <ActivityIndicator size="small" color="#818CF8" />
-                : <MaterialIcons name="refresh" size={20} color="#818CF8" />
+                ? <ActivityIndicator size="small" color="#FFF" />
+                : <MaterialIcons name="refresh" size={20} color="#FFF" />
               }
             </Pressable>
           </View>
 
           {/* Date pill */}
           <View style={r.datePill}>
-            <MaterialIcons name="calendar-today" size={13} color="#818CF8" />
-            <Text style={r.datePillTxt}>Last 7 Days · {dateRange}</Text>
+            <MaterialIcons name="event-note" size={13} color="#FFF" />
+            <Text style={r.datePillTxt}>Weekly Outlook · {dateRange}</Text>
           </View>
 
-          {/* Gauge */}
-          <View style={{ alignItems: 'center', marginVertical: 4 }}>
+          {/* Gauge - Reduced size for better visibility */}
+          <View style={{ alignItems: 'center', marginVertical: 10 }}>
             <ReportGauge pct={avgRate} />
           </View>
 
-          {/* 3 mini summary pills */}
+          {/* Mini summary pills */}
           <View style={r.miniRow}>
             <View style={r.miniPill}>
-              <MaterialIcons name="event" size={12} color="#818CF8" />
               <Text style={r.miniTxt}>{sessionsHeld} Sessions</Text>
             </View>
-            <View style={[r.miniPill, { borderColor: 'rgba(52,211,153,0.3)' }]}>
+            <View style={r.miniPill}>
               <View style={[r.miniDot, { backgroundColor: '#34D399' }]} />
-              <Text style={[r.miniTxt, { color: '#34D399' }]}>{totalPresent7d} Present</Text>
+              <Text style={r.miniTxt}>{totalPresent7d} Present</Text>
             </View>
-            <View style={[r.miniPill, { borderColor: 'rgba(248,113,113,0.3)' }]}>
+            <View style={r.miniPill}>
               <View style={[r.miniDot, { backgroundColor: '#F87171' }]} />
-              <Text style={[r.miniTxt, { color: '#F87171' }]}>{totalAbsent7d} Absent</Text>
+              <Text style={r.miniTxt}>{totalAbsent7d} Absent</Text>
             </View>
           </View>
 
-          {/* Last updated */}
-          {lastUpdated && (
-            <Text style={r.lastUpdated}>
-              Updated {lastUpdated.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-          )}
         </LinearGradient>
 
         {/* ── QUICK STATS ── */}
         <View style={r.statsRow}>
-          <StatCard icon="class"   label="Classes"    value={stats.totalClasses}  color="#4F46E5" bg="#EEF2FF" />
-          <StatCard icon="people"  label="Students"   value={stats.totalStudents} color="#059669" bg="#ECFDF5" />
-          <StatCard icon="warning" label="Need Focus" value={stats.needAttention} color="#D97706" bg="#FFFBEB" />
+          <StatCard icon="school"  label="Classes"    value={stats.totalClasses}  color="#4F46E5" bg="#FFF" />
+          <StatCard icon="groups"  label="Students"   value={stats.totalStudents} color="#10B981" bg="#FFF" />
+          <StatCard icon="track-changes" label="Accuracy" value={`${avgRate}%`} color="#F59E0B" bg="#FFF" />
         </View>
 
         {/* ── 7-DAY TREND CHART ── */}
         <View style={r.card}>
           <View style={r.cardHeader}>
             <View>
-              <Text style={r.cardTitle}>Weekly Trend</Text>
+              <Text style={r.cardTitle}>Activity Trend</Text>
               <Text style={r.cardSub}>
-                {sessionsHeld === 0 ? 'No sessions recorded this week' : `${sessionsHeld} of 7 days had sessions`}
+                {sessionsHeld === 0 ? 'No sessions recorded this week' : 'Daily engagement over 7 days'}
               </Text>
             </View>
             <View style={r.iconBtn}>
-              <MaterialIcons name="bar-chart" size={14} color="#4F46E5" />
+              <MaterialIcons name="trending-up" size={16} color="#4F46E5" />
             </View>
           </View>
 
@@ -375,86 +362,42 @@ export default function StaffReports() {
           ) : (
             <EmptyState message="No attendance data for the last 7 days." />
           )}
-
-          {/* No-session notice */}
-          {sessionsHeld === 0 && trend.length > 0 && (
-            <View style={r.noSessionBanner}>
-              <MaterialIcons name="info-outline" size={14} color="#F59E0B" />
-              <Text style={r.noSessionTxt}>Mark attendance in the Classes tab to populate this chart.</Text>
-            </View>
-          )}
         </View>
 
         {/* ── CLASS PERFORMANCE ── */}
         <View style={r.card}>
           <View style={r.cardHeader}>
-            <Text style={r.cardTitle}>Class Performance</Text>
-            <Text style={r.cardSub2}>Last 30 days</Text>
+            <Text style={r.cardTitle}>Performance Analysis</Text>
+            <Text style={r.cardSub2}>Last 30 Days</Text>
           </View>
 
           {classes.length === 0 ? (
             <EmptyState message="No classes assigned to you yet." />
           ) : (
             sortedClasses.map((cls, i) => {
-              const icons = ['science', 'calculate', 'biotech', 'psychology'] as const;
-              const palettes = [
-                { bg: '#FEF2F2', ic: '#EF4444' },
-                { bg: '#EEF2FF', ic: '#4F46E5' },
-                { bg: '#ECFDF5', ic: '#10B981' },
-                { bg: '#F5F3FF', ic: '#8B5CF6' },
-              ];
-              const pal = palettes[i % 4];
               const rate = getRealRate(cls);
               const rateColor = getAttColor(rate);
               const lbl = getLabel(rate);
-              const summary = classSummary[cls.id];
-              const hasRealData = summary && summary.total > 0;
+              const hasRealData = classSummary[cls.id]?.total > 0;
 
               return (
                 <View key={cls.id} style={[r.classRow, i > 0 && r.borderTop]}>
-                  <View style={[r.classIcon, { backgroundColor: pal.bg }]}>
-                    <MaterialIcons name={icons[i % 4]} size={18} color={pal.ic} />
-                  </View>
                   <View style={r.classInfo}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <Text style={r.className}>{cls.name}</Text>
-                      {!hasRealData && (
-                        <View style={r.naTag}>
-                          <Text style={r.naTxt}>NO RECORDS</Text>
-                        </View>
-                      )}
+                      {!hasRealData && <View style={r.naTag}><Text style={r.naTxt}>N/A</Text></View>}
                     </View>
                     <Text style={r.classMeta}>{cls.section} · {cls.year} · {cls.studentCount} Students</Text>
 
-                    {/* Progress bar */}
                     <View style={r.progressTrack}>
-                      <LinearGradient
-                        colors={hasRealData ? [rateColor, `${rateColor}88`] : ['#E2E8F0', '#E2E8F0']}
-                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                        style={[r.progressFill, { width: `${hasRealData ? rate : 0}%` as any }]}
+                      <View 
+                        style={[r.progressFill, { width: `${hasRealData ? rate : 0}%`, backgroundColor: rateColor }]} 
                       />
                     </View>
-
-                    {/* P/A/OD mini stats */}
-                    {hasRealData && (
-                      <View style={r.miniStats}>
-                        <Text style={[r.miniStat, { color: '#10B981' }]}>{summary.present}P</Text>
-                        <Text style={r.miniStatSep}>·</Text>
-                        <Text style={[r.miniStat, { color: '#EF4444' }]}>{summary.absent}A</Text>
-                        <Text style={r.miniStatSep}>·</Text>
-                        <Text style={[r.miniStat, { color: '#3B82F6' }]}>{summary.onDuty}OD</Text>
-                        <Text style={r.miniStatSep}>·</Text>
-                        <Text style={r.miniStat}>{summary.total} Total</Text>
-                      </View>
-                    )}
                   </View>
-                  <View style={{ alignItems: 'flex-end', minWidth: 66 }}>
-                    <Text style={[r.classRate, { color: hasRealData ? rateColor : '#CBD5E1' }]}>
-                      {hasRealData ? `${rate}%` : '—'}
-                    </Text>
-                    <Text style={[r.classBadge, { color: hasRealData ? lbl.color : '#CBD5E1' }]}>
-                      {hasRealData ? lbl.text : 'NO DATA'}
-                    </Text>
+                  <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
+                    <Text style={[r.classRate, { color: rateColor }]}>{hasRealData ? `${rate}%` : '—'}</Text>
+                    <Text style={[r.classBadge, { color: rateColor }]}>{hasRealData ? lbl.text : 'PENDING'}</Text>
                   </View>
                 </View>
               );
@@ -462,105 +405,32 @@ export default function StaffReports() {
           )}
         </View>
 
-        {/* ── TOP PERFORMING ── */}
-        {sortedClasses.filter(c => getRealRate(c) >= 80).length > 0 && (
-          <View style={r.card}>
-            <View style={[r.sectionPill, { backgroundColor: '#ECFDF5' }]}>
-              <View style={[r.sectionDot, { backgroundColor: '#10B981' }]} />
-              <Text style={[r.sectionLabel, { color: '#059669' }]}>Top Attended</Text>
-            </View>
-            {sortedClasses.filter(c => getRealRate(c) >= 80).slice(0, 3).map((cls, i) => {
-              const rate = getRealRate(cls);
-              const lbl = getLabel(rate);
-              return (
-                <View key={cls.id} style={[r.listRow, i > 0 && r.borderTop]}>
-                  <Text style={r.rank}>#{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={r.listName}>{cls.name}</Text>
-                    <Text style={r.listMeta}>{cls.section} · {cls.year}</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={[r.listRate, { color: lbl.color }]}>{rate}%</Text>
-                    <Text style={[r.listTag, { color: lbl.color }]}>{lbl.text}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* ── NEEDS ATTENTION ── */}
-        {needAttentionList.length > 0 && (
-          <View style={r.card}>
-            <View style={[r.sectionPill, { backgroundColor: '#FEF2F2' }]}>
-              <View style={[r.sectionDot, { backgroundColor: '#EF4444' }]} />
-              <Text style={[r.sectionLabel, { color: '#DC2626' }]}>Needs Attention</Text>
-            </View>
-            {needAttentionList.map((cls, i) => {
-              const rate = getRealRate(cls);
-              const lbl = getLabel(rate);
-              const summary = classSummary[cls.id];
-              return (
-                <View key={cls.id} style={[r.listRow, i > 0 && r.borderTop]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={r.listName}>{cls.name}</Text>
-                    <Text style={r.listMeta}>{cls.section} · {cls.year}</Text>
-                  </View>
-                  {summary && summary.total > 0 && (
-                    <View style={r.attChips}>
-                      <Text style={r.chipP}>{summary.present}P</Text>
-                      <Text style={r.chipA}>{summary.absent}A</Text>
-                    </View>
-                  )}
-                  <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
-                    <Text style={[r.listRate, { color: lbl.color }]}>{rate > 0 ? `${rate}%` : '—'}</Text>
-                    <Text style={[r.listTag, { color: lbl.color }]}>{lbl.text}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
         {/* ── RECENT SESSIONS ── */}
         <View style={r.card}>
           <View style={r.cardHeader}>
-            <Text style={r.cardTitle}>Recent Sessions</Text>
-            <View style={r.iconBtn}>
-              <MaterialIcons name="history" size={14} color="#4F46E5" />
-            </View>
+            <Text style={r.cardTitle}>Recent Logs</Text>
+            <MaterialIcons name="history" size={16} color="#4F46E5" />
           </View>
 
           {logs.length === 0 ? (
-            <EmptyState message="No sessions recorded yet. Mark attendance to see logs here." />
+            <EmptyState message="No recent sessions available." />
           ) : (
-            logs.slice(0, 8).map((log, i) => {
+            logs.slice(0, 5).map((log, i) => {
               const rate = log.total > 0 ? Math.round(((log.present + (log.onDuty || 0)) / log.total) * 100) : 0;
               const rateColor = getAttColor(rate);
-              const absentCount = log.total - log.present - (log.onDuty || 0);
               const formattedDate = new Date(log.date + 'T00:00:00').toLocaleDateString('en-US', {
-                weekday: 'short', month: 'short', day: 'numeric',
+                month: 'short', day: 'numeric',
               });
               return (
                 <View key={log.id || i} style={[r.logRow, i > 0 && r.borderTop]}>
-                  <View style={[r.logIcon, { backgroundColor: `${rateColor}15` }]}>
-                    <MaterialIcons
-                      name={rate >= 75 ? 'check-circle' : 'warning'}
-                      size={16} color={rateColor}
-                    />
-                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={r.logName}>{log.className}</Text>
                     <Text style={r.logDate}>{formattedDate}</Text>
                   </View>
                   <View style={r.logStats}>
-                    <View style={r.logP}><Text style={r.logPS}>{log.present}P</Text></View>
-                    {absentCount > 0 && (
-                      <View style={r.logA}><Text style={r.logAS}>{absentCount}A</Text></View>
-                    )}
-                    {(log.onDuty || 0) > 0 && (
-                      <View style={r.logOD}><Text style={r.logODS}>{log.onDuty}OD</Text></View>
-                    )}
+                    <View style={[r.logStatusPill, { backgroundColor: `${rateColor}15` }]}>
+                      <Text style={[r.logStatusTxt, { color: rateColor }]}>{rate}%</Text>
+                    </View>
                   </View>
                 </View>
               );
@@ -579,140 +449,94 @@ export default function StaffReports() {
 function EmptyState({ message }: { message: string }) {
   return (
     <View style={e.wrap}>
-      <MaterialIcons name="inbox" size={28} color="#CBD5E1" />
+      <MaterialIcons name="inbox" size={24} color="#CBD5E1" />
       <Text style={e.txt}>{message}</Text>
     </View>
   );
 }
 const e = StyleSheet.create({
-  wrap: { alignItems: 'center', paddingVertical: 24, gap: 8 },
-  txt: { fontSize: 12, color: '#94A3B8', textAlign: 'center', lineHeight: 18, paddingHorizontal: 16 },
+  wrap: { alignItems: 'center', paddingVertical: 20, gap: 6 },
+  txt: { fontSize: 11, color: '#94A3B8', textAlign: 'center' },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────
 const r = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F5F7FF' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F7FF' },
+  root: { flex: 1, backgroundColor: '#F8FAFC' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
 
   // Hero
-  hero: { paddingHorizontal: 20, paddingBottom: 24, overflow: 'hidden' },
-  heroBlob1: {
-    position: 'absolute', width: 220, height: 220, borderRadius: 110,
-    backgroundColor: 'rgba(99,102,241,0.12)', top: -60, right: -50,
-  },
-  heroBlob2: {
-    position: 'absolute', width: 150, height: 150, borderRadius: 75,
-    backgroundColor: 'rgba(79,70,229,0.08)', bottom: 20, left: -30,
+  hero: { 
+    paddingHorizontal: 20, paddingBottom: 35, 
+    borderBottomLeftRadius: 35, borderBottomRightRadius: 35,
   },
   heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
-  heroLabel: { fontSize: 10, color: '#818CF8', fontWeight: '800', letterSpacing: 1.8, marginBottom: 4 },
-  heroTitle: { fontSize: 28, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 },
-  heroSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginTop: 2 },
+  heroLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: '800', letterSpacing: 1.5, marginBottom: 4 },
+  heroTitle: { fontSize: 26, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 },
+  heroSub: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2, fontWeight: '600' },
   refreshBtn: {
-    width: 40, height: 40, borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
+    width: 38, height: 38, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     justifyContent: 'center', alignItems: 'center',
   },
   datePill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 22, marginBottom: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 20, marginBottom: 10,
   },
-  datePillTxt: { fontSize: 11, color: '#C7D2FE', fontWeight: '600' },
-  miniRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  datePillTxt: { fontSize: 11, color: '#FFF', fontWeight: '700' },
+  miniRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
   miniPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 15,
     paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1, borderColor: 'rgba(129,140,248,0.2)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
   },
   miniDot: { width: 6, height: 6, borderRadius: 3 },
-  miniTxt: { fontSize: 11, color: '#C7D2FE', fontWeight: '700' },
-  lastUpdated: { fontSize: 10, color: 'rgba(255,255,255,0.25)', textAlign: 'center', marginTop: 8, fontWeight: '600' },
+  miniTxt: { fontSize: 10, color: '#FFF', fontWeight: '800' },
 
   // Stats row
-  statsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 14, marginTop: 14 },
+  statsRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginTop: -20 },
 
   // Cards
   card: {
-    backgroundColor: '#FFF', borderRadius: 22,
-    marginHorizontal: 14, marginTop: 12, padding: 18,
-    shadowColor: '#4F46E5', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05, shadowRadius: 10, elevation: 2,
+    backgroundColor: '#FFF', borderRadius: 24,
+    marginHorizontal: 16, marginTop: 16, padding: 18,
+    shadowColor: '#4F46E5', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05, shadowRadius: 12, elevation: 3,
   },
   cardHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
   },
-  cardTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  cardTitle: { fontSize: 15, fontWeight: '800', color: '#1E293B' },
   cardSub: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 2 },
-  cardSub2: { fontSize: 11, color: '#94A3B8', fontWeight: '600', alignSelf: 'center' },
+  cardSub2: { fontSize: 10, color: '#4F46E5', fontWeight: '800', backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   iconBtn: {
-    width: 34, height: 34, borderRadius: 10,
-    backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center',
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center',
   },
-
-  noSessionBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#FFFBEB', borderRadius: 12,
-    paddingHorizontal: 12, paddingVertical: 10, marginTop: 10,
-    borderWidth: 1, borderColor: '#FCD34D',
-  },
-  noSessionTxt: { fontSize: 11, color: '#92400E', fontWeight: '600', flex: 1 },
 
   // Class rows
-  classRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 14, gap: 12 },
-  borderTop: { borderTopWidth: 1, borderTopColor: '#F8FAFF' },
-  classIcon: { width: 38, height: 38, borderRadius: 11, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
-  classInfo: { flex: 1, gap: 5 },
-  className: { fontSize: 14, fontWeight: '800', color: '#0F172A' },
-  classMeta: { fontSize: 11, color: '#94A3B8', fontWeight: '600' },
-  progressTrack: { height: 5, backgroundColor: '#F1F5F9', borderRadius: 3, overflow: 'hidden' },
+  classRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
+  borderTop: { borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  classInfo: { flex: 1, gap: 6 },
+  className: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
+  classMeta: { fontSize: 11, color: '#64748B', fontWeight: '600' },
+  progressTrack: { height: 6, backgroundColor: '#F1F5F9', borderRadius: 3, overflow: 'hidden', marginTop: 4 },
   progressFill: { height: '100%', borderRadius: 3 },
-  miniStats: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  miniStat: { fontSize: 10, fontWeight: '800', color: '#94A3B8' },
-  miniStatSep: { fontSize: 10, color: '#CBD5E1' },
   classRate: { fontSize: 16, fontWeight: '900', letterSpacing: -0.5 },
   classBadge: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5, marginTop: 1 },
-  naTag: {
-    backgroundColor: '#F1F5F9', borderRadius: 6,
-    paddingHorizontal: 6, paddingVertical: 2,
-  },
-  naTxt: { fontSize: 8, fontWeight: '800', color: '#94A3B8', letterSpacing: 0.5 },
-
-  // Section pills
-  sectionPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 7,
-    alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 20, marginBottom: 12,
-  },
-  sectionDot: { width: 7, height: 7, borderRadius: 4 },
-  sectionLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
-
-  // List rows
-  listRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 10 },
-  rank: { fontSize: 13, fontWeight: '900', color: '#CBD5E1', width: 24, textAlign: 'center' },
-  listName: { fontSize: 14, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
-  listMeta: { fontSize: 11, color: '#94A3B8', fontWeight: '600' },
-  listRate: { fontSize: 16, fontWeight: '900', letterSpacing: -0.5 },
-  listTag: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  attChips: { flexDirection: 'row', gap: 4 },
-  chipP: { fontSize: 11, fontWeight: '800', color: '#10B981', backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  chipA: { fontSize: 11, fontWeight: '800', color: '#EF4444', backgroundColor: '#FEF2F2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  naTag: { backgroundColor: '#F1F5F9', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  naTxt: { fontSize: 8, fontWeight: '800', color: '#94A3B8' },
 
   // Log rows
-  logRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 12 },
-  logIcon: { width: 36, height: 36, borderRadius: 11, justifyContent: 'center', alignItems: 'center' },
-  logName: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
+  logRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 12 },
+  logName: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
   logDate: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 1 },
-  logStats: { flexDirection: 'row', gap: 5 },
-  logP: { backgroundColor: '#ECFDF5', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 },
-  logPS: { fontSize: 10, fontWeight: '800', color: '#10B981' },
-  logA: { backgroundColor: '#FEF2F2', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 },
-  logAS: { fontSize: 10, fontWeight: '800', color: '#EF4444' },
-  logOD: { backgroundColor: '#EFF6FF', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 },
-  logODS: { fontSize: 10, fontWeight: '800', color: '#3B82F6' },
+  logStats: { flexDirection: 'row', alignItems: 'center' },
+  logStatusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  logStatusTxt: { fontSize: 12, fontWeight: '800' },
 });
+

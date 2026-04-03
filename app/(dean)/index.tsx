@@ -3,27 +3,38 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Dimensions, ActivityIndicator, Alert, Modal, TextInput, Image,
 } from 'react-native';
-import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Circle, G } from 'react-native-svg';
+import Svg, { Circle, G, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
 import { Calendar } from 'react-native-calendars';
+import Animated, { 
+  useSharedValue, useAnimatedProps, withTiming, 
+  FadeInDown, FadeInRight, useAnimatedStyle 
+} from 'react-native-reanimated';
+import { 
+  School, Users, CheckCircle2, XCircle, 
+  RefreshCw, Calendar as CalendarIcon, ChevronRight,
+  TrendingUp, Activity
+} from 'lucide-react-native';
 import { useAuth } from '../../hooks/useAuth';
 import { dataService, ClassData } from '../../services/dataService';
-import { colors, spacing, shadows, borderRadius } from '../../constants/theme';
+import { colors, spacing, shadows, borderRadius, gradients } from '../../constants/theme';
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const { width } = Dimensions.get('window');
 const GAUGE_SIZE = width * 0.35;
-const STROKE_WIDTH = 12;
+const STROKE_WIDTH = 11;
 const RADIUS = (GAUGE_SIZE - STROKE_WIDTH) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 const PALETTE = [
-  { bg: '#EEF2FF', ic: '#4F46E5', fi: 'atom' },
-  { bg: '#ECFDF5', ic: '#059669', fi: 'flask' },
-  { bg: '#EFF6FF', ic: '#2563EB', fi: 'calculator' },
-  { bg: '#FFFBEB', ic: '#D97706', fi: 'book' },
-  { bg: '#FDF2F8', ic: '#DB2777', fi: 'microscope' },
+  { bg: '#EEF2FF', ic: '#4F46E5', Icon: Activity },
+  { bg: '#ECFDF5', ic: '#059669', Icon: School },
+  { bg: '#EFF6FF', ic: '#2563EB', Icon: TrendingUp },
+  { bg: '#FFFBEB', ic: '#D97706', Icon: Users },
+  { bg: '#FDF2F8', ic: '#DB2777', Icon: CheckCircle2 },
 ];
 
 export default function DeanHome() {
@@ -163,21 +174,35 @@ export default function DeanHome() {
   }, [holidays, markingHoliday]);
 
   const overall = useMemo(() => {
-    // If we have stats for today, use them for a reactive dashboard experience
     const totalToday = stats.presentToday + stats.absentToday + stats.onDutyToday;
     if (totalToday > 0 && stats.totalStudents > 0) {
-      // Calculate based on total students to reflect "Out of total"
       return Math.round(((stats.presentToday + stats.onDutyToday) / stats.totalStudents) * 100);
     }
-    
-    // Fallback to department average from class records
     return classes.length > 0
       ? Math.round(classes.reduce((s, c) => s + (c.attendanceRate || 0), 0) / classes.length)
       : 0;
   }, [classes, stats]);
 
-  const offset = CIRCUMFERENCE - (overall / 100) * CIRCUMFERENCE;
-  const ringColor = overall >= 80 ? '#10B981' : overall >= 75 ? '#34D399' : overall >= 60 ? '#F59E0B' : '#EF4444';
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withTiming(overall / 100, { duration: 1500 });
+  }, [overall, progress]);
+
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: CIRCUMFERENCE * (1 - progress.value),
+  }));
+
+  const ringColor = overall >= 80 ? '#34D399' : overall >= 60 ? '#F59E0B' : '#EF4444';
+  
+  const dotStyle = useAnimatedStyle(() => {
+    const angle = (2 * Math.PI * progress.value) - Math.PI / 2;
+    return {
+      transform: [
+        { translateX: RADIUS * Math.cos(angle) },
+        { translateY: RADIUS * Math.sin(angle) }
+      ]
+    };
+  });
 
   const depts = useMemo(() => {
     const deptMap: Record<string, { n: number; r: number }> = {};
@@ -202,39 +227,59 @@ export default function DeanHome() {
     });
   }, [classes, overall, user]);
 
-  const total = stats.presentToday + stats.absentToday + stats.onDutyToday;
+
 
 
 
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
 
+  const today = new Date();
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dateStr = `${dayNames[today.getDay()]}, ${monthNames[today.getMonth()]} ${today.getDate()}`;
+  const hour = today.getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const firstName = user?.name?.split(' ')[0] || 'there';
+
   return (
     <View style={styles.root}>
-      <LinearGradient colors={['#0F172A', '#1E293B']}
+      <LinearGradient colors={gradients.premium as any}
         style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={styles.topBar}>
-          <View>
-            <Text style={styles.greeting}>Welcome back 👋</Text>
-            <Text style={styles.deptName}>{user?.department || 'Dean Dashboard'}</Text>
+          <Animated.View entering={FadeInDown.delay(100).duration(800)} style={styles.greetingGroup}>
+            <Text style={styles.greetingLabel}>{greeting},</Text>
+            <Text style={styles.greetingName}>{firstName} 👋</Text>
+          </Animated.View>
+          <View style={styles.rightActionsGroup}>
+            <Text style={styles.dateDisplay}>{dateStr.toUpperCase()}</Text>
+            <Pressable onPress={() => setLeaveModalOpen(true)} style={styles.iconBtn}>
+              <CalendarIcon size={20} color="#FFF" />
+            </Pressable>
           </View>
-          <Pressable onPress={() => setLeaveModalOpen(true)} style={styles.iconBtn}>
-            <MaterialIcons name="event" size={22} color="#FFF" />
-          </Pressable>
         </View>
 
         <View style={styles.gaugeRow}>
-          <View style={styles.gaugeWrap}>
+          <Animated.View entering={FadeInRight.delay(200).duration(1000)} style={styles.gaugeWrap}>
             {loading
               ? <ActivityIndicator color="#4F7FFF" size="large" style={{ width: GAUGE_SIZE, height: GAUGE_SIZE }} />
               : <View style={{ width: GAUGE_SIZE, height: GAUGE_SIZE, alignItems: 'center', justifyContent: 'center' }}>
                   <Svg width={GAUGE_SIZE} height={GAUGE_SIZE}>
+                    <Defs>
+                      <SvgGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <Stop offset="0%" stopColor={ringColor} stopOpacity={1} />
+                        <Stop offset="100%" stopColor={ringColor} stopOpacity={0.6} />
+                      </SvgGradient>
+                    </Defs>
                     <G rotation="-90" origin={`${GAUGE_SIZE / 2}, ${GAUGE_SIZE / 2}`}>
                       <Circle cx={GAUGE_SIZE/2} cy={GAUGE_SIZE/2} r={RADIUS}
                         stroke="rgba(255,255,255,0.08)" strokeWidth={STROKE_WIDTH} fill="none" />
-                      <Circle cx={GAUGE_SIZE/2} cy={GAUGE_SIZE/2} r={RADIUS}
-                        stroke={ringColor} strokeWidth={STROKE_WIDTH}
-                        strokeDasharray={CIRCUMFERENCE} strokeDashoffset={offset}
-                        strokeLinecap="round" fill="none" />
+                      <AnimatedCircle 
+                        cx={GAUGE_SIZE/2} cy={GAUGE_SIZE/2} r={RADIUS}
+                        stroke="url(#gaugeGradient)" strokeWidth={STROKE_WIDTH}
+                        strokeDasharray={CIRCUMFERENCE}
+                        animatedProps={animatedProps}
+                        strokeLinecap="round" fill="none" 
+                      />
                     </G>
                   </Svg>
                   <View style={styles.gaugeCenter}>
@@ -244,62 +289,80 @@ export default function DeanHome() {
                     </View>
                     <Text style={styles.pctLabel}>ATTENDANCE</Text>
                   </View>
+                  {/* Premium Accent Dot - Position computed absolute to overlay the progress end */}
+                  <Animated.View style={[
+                    {
+                      position: 'absolute',
+                      width: STROKE_WIDTH * 0.8,
+                      height: STROKE_WIDTH * 0.8,
+                      borderRadius: STROKE_WIDTH * 0.4,
+                      backgroundColor: '#FFF',
+                      shadowColor: '#FFF',
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 0.8,
+                      shadowRadius: 5,
+                      elevation: 5,
+                    },
+                    dotStyle
+                  ]} />
                 </View>
             }
-          </View>
+          </Animated.View>
 
           <View style={styles.tileGrid}>
             {[
-              { label: 'Classes', value: stats.totalClasses, icon: 'school', color: '#818CF8' },
-              { label: 'Students', value: stats.totalStudents, icon: 'people', color: '#34D399' },
-              { label: 'Present', value: stats.presentToday, icon: 'check-circle', color: '#10B981' },
-              { label: 'Absent', value: stats.absentToday, icon: 'cancel', color: '#F87171' },
-            ].map(t => (
-              <View key={t.label} style={styles.tile}>
+              { label: 'Classes', value: stats.totalClasses, icon: School, color: '#818CF8' },
+              { label: 'Students', value: stats.totalStudents, icon: Users, color: '#34D399' },
+              { label: 'Present', value: stats.presentToday, icon: CheckCircle2, color: '#10B981' },
+              { label: 'Absent', value: stats.absentToday, icon: XCircle, color: '#F87171' },
+            ].map((t, i) => (
+              <Animated.View 
+                key={t.label} 
+                entering={FadeInRight.delay(300 + (i * 100)).duration(800)}
+                style={styles.tile}
+              >
                 <View style={[styles.tileIcon, { backgroundColor: `${t.color}20` }]}>
-                  <MaterialIcons name={t.icon as any} size={14} color={t.color} />
+                  <t.icon size={16} color={t.color} />
                 </View>
                 <View>
                   <Text style={styles.tileVal} numberOfLines={1}>{loading ? '—' : t.value}</Text>
                   <Text style={styles.tileLbl} numberOfLines={1}>{t.label}</Text>
                 </View>
-              </View>
+              </Animated.View>
             ))}
           </View>
         </View>
 
-        {!loading && total > 0 && (
-          <View style={styles.barWrap}>
-            <View style={styles.bar}>
-              <View style={[styles.seg, { flex: stats.presentToday, backgroundColor: '#10B981' }]} />
-              <View style={[styles.seg, { flex: stats.onDutyToday, backgroundColor: '#F59E0B' }]} />
-              <View style={[styles.seg, { flex: stats.absentToday, backgroundColor: '#EF4444' }]} />
-            </View>
-            <Text style={styles.barLbl}>{total} students recorded today</Text>
-          </View>
-        )}
+
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <View style={styles.secRow}>
-          <Text style={styles.secTitle}>Departmental Overview</Text>
+        <Animated.View entering={FadeInDown.delay(700).duration(800)} style={styles.secRow}>
+          <View>
+            <Text style={styles.secTitle}>Departmental Overview</Text>
+            <Text style={styles.secSubtitle}>Real-time performance metrics</Text>
+          </View>
           <Pressable onPress={fetchAll} style={styles.refreshBtn}>
-            <MaterialIcons name="refresh" size={18} color={colors.primaryBlue} />
+            <RefreshCw size={18} color={colors.primaryBlue} />
           </Pressable>
-        </View>
+        </Animated.View>
 
         {loading
           ? <ActivityIndicator color={colors.primaryBlue} style={{ marginVertical: 24 }} />
           : depts.length === 0
             ? <View style={[styles.emptyCard, shadows.sm]}>
-                <MaterialIcons name="school" size={40} color="#CBD5E1" />
+                <School size={48} color="#CBD5E1" />
                 <Text style={styles.emptyTitle}>No classes yet</Text>
                 <Text style={styles.emptyDesc}>Go to Management tab to create your first class.</Text>
               </View>
-            : depts.map(d => (
-                <View key={d.name} style={[styles.deptCard, shadows.sm]}>
+            : depts.map((d, i) => (
+                <Animated.View 
+                  key={d.name} 
+                  entering={FadeInDown.delay(800 + (i * 100)).duration(800)}
+                  style={[styles.deptCard, shadows.sm]}
+                >
                   <View style={[styles.deptIcon, { backgroundColor: d.bg }]}>
-                    <FontAwesome5 name={d.fi as any} size={16} color={d.ic} />
+                    <d.Icon size={16} color={d.ic} />
                   </View>
                   <View style={styles.deptInfo}>
                     <Text style={styles.deptNm}>{d.name}</Text>
@@ -310,28 +373,36 @@ export default function DeanHome() {
                     </View>
                     <View style={styles.progBg}>
                       <LinearGradient 
-                        colors={[d.ic, `${d.ic}80`]} 
+                        colors={[d.ic, `${d.ic}60`]} 
                         start={{x:0, y:0}} end={{x:1, y:0}}
                         style={[styles.progFill, { width: `${d.pct}%` as any }]} 
                       />
                     </View>
                   </View>
                   <View style={[styles.pctBadge, { backgroundColor: `${d.ic}10` }]}>
+                    <TrendingUp size={12} color={d.ic} style={{ marginRight: 4 }} />
                     <Text style={[styles.pctText, { color: d.ic }]}>{d.pct}%</Text>
                   </View>
-                </View>
+                </Animated.View>
               ))
         }
 
         {recentLogs.length > 0 && (
           <>
-            <View style={[styles.secRow, { marginTop: spacing.lg }]}>
-              <Text style={styles.secTitle}>Recent Activity</Text>
-            </View>
-            {recentLogs.map(log => {
+            <Animated.View entering={FadeInDown.delay(1000).duration(800)} style={[styles.secRow, { marginTop: spacing.lg }]}>
+              <View>
+                <Text style={styles.secTitle}>Recent Activity</Text>
+                <Text style={styles.secSubtitle}>Latest attendance submissions</Text>
+              </View>
+            </Animated.View>
+            {recentLogs.map((log, i) => {
               const good = (log.absent || 0) === 0;
               return (
-                <View key={log.id} style={[styles.logCard, shadows.sm]}>
+                <Animated.View 
+                  key={log.id} 
+                  entering={FadeInDown.delay(1100 + (i * 100)).duration(800)}
+                  style={[styles.logCard, shadows.sm]}
+                >
                   <View style={[styles.logIcon, { backgroundColor: good ? '#ECFDF5' : '#FFF1F2', overflow: 'hidden' }]}>
                     {log.advisorImage ? (
                       <Image source={{ uri: log.advisorImage }} style={{ width: '100%', height: '100%' }} />
@@ -342,10 +413,11 @@ export default function DeanHome() {
                   <View style={styles.logInfo}>
                     <Text style={styles.logClass} numberOfLines={1}>{log.className}</Text>
                     <Text style={styles.logMeta}>
-                      Marked by {log.markedBy} • {log.present}P, {log.absent}A, {log.onDuty}OD
+                      <Text style={{ fontWeight: '800' }}>{log.markedBy}</Text> • {log.present}P, {log.absent}A{log.onDuty > 0 ? `, ${log.onDuty}OD` : ''}
                     </Text>
                   </View>
-                </View>
+                  <ChevronRight size={16} color="#CBD5E1" />
+                </Animated.View>
               );
             })}
           </>
@@ -367,7 +439,7 @@ export default function DeanHome() {
             </View>
           </View>
 
-          <View style={styles.modalBody}>
+          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
             <View style={[styles.calendarContainer, shadows.md]}>
               <Calendar
                 theme={{
@@ -416,31 +488,42 @@ export default function DeanHome() {
 
             <Text style={[styles.modalTitle, { marginTop: spacing.xl, marginBottom: spacing.sm, fontSize: 16 }]}>Upcoming Activities</Text>
             {holidays.length === 0 ? (
-              <Text style={styles.modalSub}>No upcoming events or leaves</Text>
+              <View style={styles.emptyEvents}>
+                <CalendarIcon size={32} color="#CBD5E1" />
+                <Text style={styles.modalSub}>No upcoming events or leaves</Text>
+              </View>
             ) : (
-              [...holidays].sort((a,b) => a.date.localeCompare(b.date)).map(h => {
-                let color = '#10B981';
-                let type = 'Leave';
-                let note = h.note;
-                if (h.note.startsWith('[Event]')) { color = '#3B82F6'; type = 'Event'; note = h.note.replace('[Event] ', ''); }
-                else if (h.note.startsWith('[Function]')) { color = '#F59E0B'; type = 'Function'; note = h.note.replace('[Function] ', ''); }
-                else if (h.note.startsWith('[Leave]')) { note = h.note.replace('[Leave] ', ''); }
+              <View style={{ gap: 12 }}>
+                {[...holidays].sort((a,b) => a.date.localeCompare(b.date)).map(h => {
+                  let color = '#10B981';
+                  let type = 'Leave';
+                  let note = h.note;
+                  if (h.note.startsWith('[Event]')) { color = '#3B82F6'; type = 'Event'; note = h.note.replace('[Event] ', ''); }
+                  else if (h.note.startsWith('[Function]')) { color = '#F59E0B'; type = 'Function'; note = h.note.replace('[Function] ', ''); }
+                  else if (h.note.startsWith('[Leave]')) { note = h.note.replace('[Leave] ', ''); }
 
-                return (
-                  <View key={h.date} style={styles.eventListItem}>
-                    <View style={[styles.eventListColor, { backgroundColor: color }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.eventListDate}>{new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-                      <Text style={styles.eventListNote} numberOfLines={1}>{note || 'No description'}</Text>
-                    </View>
-                    <View style={[styles.typeBadge, { backgroundColor: `${color}15` }]}>
-                      <Text style={[styles.typeBadgeText, { color }]}>{type}</Text>
-                    </View>
-                  </View>
-                );
-              })
+                  return (
+                    <Pressable 
+                      key={h.date} 
+                      style={[styles.eventListItem, shadows.sm]}
+                      onPress={() => handleDayPress(h.date)}
+                    >
+                      <View style={[styles.eventListColor, { backgroundColor: color }]} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.eventListDate}>{new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                        <Text style={styles.eventListNote} numberOfLines={1}>{note || 'No description'}</Text>
+                      </View>
+                      <View style={[styles.typeBadge, { backgroundColor: `${color}15` }]}>
+                        <Text style={[styles.typeBadgeText, { color }]}>{type}</Text>
+                      </View>
+                      <MaterialIcons name="edit" size={16} color="#CBD5E1" style={{ marginLeft: 4 }} />
+                    </Pressable>
+                  );
+                })}
+              </View>
             )}
-          </View>
+            <View style={{ height: 100 }} />
+          </ScrollView>
 
           {/* Event Details Editor Overlay */}
           {eventModal.visible && (
@@ -504,93 +587,132 @@ const styles = StyleSheet.create({
   header: { paddingBottom: spacing.lg, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 },
   topBar: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', paddingHorizontal: spacing.lg, marginBottom: spacing.lg,
+    alignItems: 'flex-start', paddingHorizontal: spacing.lg, marginBottom: spacing.lg,
   },
-  greeting: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '600', letterSpacing: 0.5 },
-  deptName: { fontSize: 22, fontWeight: '900', color: '#FFF', marginTop: 2, letterSpacing: -0.5 },
+  greetingGroup: { flex: 1, flexShrink: 1, paddingRight: 8 },
+  greetingLabel: { fontSize: 18, fontWeight: '400', color: 'rgba(255,255,255,0.8)' },
+  greetingName: { fontSize: 28, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 },
+  rightActionsGroup: { alignItems: 'flex-end', gap: 6, marginTop: 4 },
+  dateDisplay: { fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: '800', letterSpacing: 1 },
   iconBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    marginTop: 2,
   },
   gaugeRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: spacing.lg, gap: spacing.lg, marginBottom: spacing.md,
+    flexDirection: 'row', 
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg, 
+    gap: 16, 
+    marginBottom: spacing.lg,
   },
   gaugeWrap: { 
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    padding: 10, borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    padding: 12, borderRadius: borderRadius.full,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)',
   },
-  tileGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  tileGrid: { 
+    flex: 1, 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    justifyContent: 'space-between',
+    alignContent: 'center',
+    gap: 8,
+  },
   tile: {
-    width: '47%', backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 20, padding: 12, flexDirection: 'column', alignItems: 'flex-start', gap: 4,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)',
-    marginBottom: spacing.xs,
+    width: '47%', 
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16, 
+    padding: 12, 
+    flexDirection: 'column', 
+    alignItems: 'flex-start', 
+    gap: 6,
+    borderWidth: 1, 
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 8,
   },
-  tileIcon: { width: 24, height: 24, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
-  tileVal: { fontSize: 16, fontWeight: '900', color: '#FFF' },
-  tileLbl: { fontSize: 8, color: 'rgba(255,255,255,0.4)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  barWrap: { paddingHorizontal: spacing.lg, gap: 6 },
-  bar: { flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.1)' },
+  tileIcon: { 
+    width: 32, 
+    height: 32, 
+    borderRadius: 10, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  tileVal: { fontSize: 20, fontWeight: '900', color: '#FFF' },
+  tileLbl: { 
+    fontSize: 9, 
+    color: 'rgba(255,255,255,0.4)', 
+    fontWeight: '800', 
+    textTransform: 'uppercase', 
+    letterSpacing: 0.8,
+    marginTop: -2,
+  },
+  barWrap: { paddingHorizontal: spacing.lg, gap: 10 },
+  bar: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.1)' },
   seg: { height: '100%' },
+  barMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   barLbl: { fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: '600' },
-  body: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: 100 },
+  body: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: 120 },
   secRow: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'flex-start', marginBottom: spacing.md,
+    alignItems: 'center', marginBottom: spacing.md,
   },
   secTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', letterSpacing: -0.5 },
-  secSubtitle: { fontSize: 12, color: '#64748B', fontWeight: '500', marginTop: 2 },
+  secSubtitle: { fontSize: 12, color: '#64748B', fontWeight: '500', marginTop: 1 },
   
   calendarContainer: {
-    backgroundColor: '#FFF', borderRadius: 24, padding: 10, overflow: 'hidden',
+    backgroundColor: '#FFF', borderRadius: 28, padding: 12, overflow: 'hidden',
     borderWidth: 1, borderColor: '#F1F5F9',
   },
   
   refreshBtn: {
-    width: 38, height: 38, borderRadius: 12,
-    backgroundColor: `${colors.primaryBlue}10`,
+    width: 42, height: 42, borderRadius: 14,
+    backgroundColor: '#FFF',
     justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: '#F1F5F9',
   },
   emptyCard: {
     backgroundColor: '#FFF', borderRadius: borderRadius.xl,
-    padding: spacing.xl, alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md,
+    padding: spacing.xl, alignItems: 'center', gap: spacing.md, marginBottom: spacing.md,
+    borderWidth: 1, borderColor: '#F1F5F9',
   },
   emptyTitle: { fontSize: 16, fontWeight: 'bold', color: '#0F172A' },
-  emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center', lineHeight: 18 },
+  emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center', lineHeight: 20 },
   deptCard: {
-    backgroundColor: '#FFF', borderRadius: 24,
+    backgroundColor: '#FFF', borderRadius: 26,
     padding: 16, flexDirection: 'row',
     alignItems: 'center', marginBottom: spacing.md, gap: 16,
     borderWidth: 1, borderColor: '#F1F5F9',
   },
-  deptIcon: { width: 52, height: 52, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  deptIcon: { width: 56, height: 56, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   deptInfo: { flex: 1, gap: 4 },
   deptNm: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
-  deptMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  deptSub: { fontSize: 12, color: '#64748B', fontWeight: '500' },
-  metaDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: '#CBD5E1' },
-  progBg: { height: 6, backgroundColor: '#F1F5F9', borderRadius: 3, overflow: 'hidden', marginTop: 6 },
-  progFill: { height: '100%', borderRadius: 3 },
-  pctBadge: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14 },
+  deptMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  deptSub: { fontSize: 12, color: '#64748B', fontWeight: '600' },
+  metaDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#CBD5E1' },
+  progBg: { height: 7, backgroundColor: '#F1F5F9', borderRadius: 4, overflow: 'hidden', marginTop: 8 },
+  progFill: { height: '100%', borderRadius: 4 },
+  pctBadge: { 
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14 
+  },
   pctText: { fontSize: 14, fontWeight: '900' },
   
   logCard: {
-    backgroundColor: '#FFF', borderRadius: 20,
-    padding: 16, flexDirection: 'row',
-    alignItems: 'center', marginBottom: spacing.sm, gap: 12,
+    backgroundColor: '#FFF', borderRadius: 22,
+    padding: 14, flexDirection: 'row',
+    alignItems: 'center', marginBottom: 12, gap: 14,
     borderWidth: 1, borderColor: '#F1F5F9',
   },
-  logIcon: { width: 44, height: 44, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  logIcon: { width: 48, height: 48, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   logInfo: { flex: 1 },
-  logClass: { fontSize: 14, fontWeight: '700', color: '#1E293B' },
-  logMeta: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '500' },
+  logClass: { fontSize: 14, fontWeight: '800', color: '#1E293B' },
+  logMeta: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '600' },
   
-  footerSpacer: { height: 60 },
+  footerSpacer: { height: 80 },
 
   // Gauge Overlay
   gaugeCenter: {
@@ -603,22 +725,22 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   pctNum: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: '900',
     color: '#FFF',
     letterSpacing: -1,
   },
   pctSym: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '900',
     color: 'rgba(255,255,255,0.7)',
-    marginTop: 10,
+    marginTop: 6,
     marginLeft: 2,
   },
   pctLabel: {
-    fontSize: 8,
+    fontSize: 7,
     color: 'rgba(255,255,255,0.45)',
-    letterSpacing: 1.5,
+    letterSpacing: 1.2,
     fontWeight: '900',
     marginTop: -2,
     textTransform: 'uppercase',
@@ -679,4 +801,15 @@ const styles = StyleSheet.create({
   cancelBtn: { backgroundColor: '#F1F5F9' },
   cancelBtnText: { color: '#64748B', fontWeight: '700' },
   deleteBtn: { backgroundColor: '#FFF1F2', width: 48 },
+  emptyEvents: { 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    padding: 24, 
+    backgroundColor: '#FFF', 
+    borderRadius: 20, 
+    borderWidth: 1, 
+    borderColor: '#F1F5F9',
+    gap: 12,
+    marginTop: 12 
+  },
 });

@@ -3,20 +3,21 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Dimensions, ActivityIndicator, Alert, Image,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import { Download, Calendar, RefreshCcw, FileText, TrendingUp, Users, School, AlertCircle, BadgeCheck, Activity } from 'lucide-react-native';
+import Animated, { FadeInDown, FadeInUp, FadeInRight, useAnimatedProps, useSharedValue, withTiming, withDelay, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Svg, Path, G, Text as SvgText, Defs, LinearGradient as SvgGradient, Stop, Circle, Rect } from 'react-native-svg';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { dataService } from '../../services/dataService';
-import { colors, spacing, shadows, borderRadius } from '../../constants/theme';
+import { colors, spacing, shadows, gradients } from '../../constants/theme';
 import { format, startOfWeek, startOfMonth, isAfter, subDays } from 'date-fns';
 import { useAuth } from '../../hooks/useAuth';
 
 const { width } = Dimensions.get('window');
 
-type Period = 'Today' | 'Week' | 'Month' | 'All';
+type Period = 'Today' | 'Week' | 'Month';
 
 // ─── Generate HTML for PDF ───────────────────────────────────
 const buildHTML = (logs: any[], period: string, stats: any) => `
@@ -67,6 +68,8 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
 </body>
 </html>`;
 
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
 export default function DeanReports() {
   const insets = useSafeAreaInsets();
   const { user, loading: authLoading } = useAuth();
@@ -76,6 +79,9 @@ export default function DeanReports() {
   const [stats, setStats] = useState({ totalClasses: 0, presentToday: 0, absentToday: 0, onDutyToday: 0 });
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+
+  // Animation values
+  const progress = useSharedValue(0);
 
   const fetchData = useCallback(async () => {
     if (authLoading || !user) return;
@@ -88,8 +94,8 @@ export default function DeanReports() {
       setAllLogs(logs);
       setStats(st);
       
-      const latestLog = logs[0]?.date || format(new Date(), 'yyyy-MM-dd');
-      setSelectedDay(latestLog.substring(0, 10));
+      const today = format(new Date(), 'yyyy-MM-dd');
+      setSelectedDay(today);
     } catch {
     } finally {
       setLoading(false);
@@ -109,61 +115,85 @@ export default function DeanReports() {
     }
   }, [fetchData, authLoading, user]);
 
-  // Filter logs by period
-  const filteredLogs = allLogs.filter(l => {
+
+  // 1. Calculations first
+  const filteredLogs = useMemo(() => allLogs.filter(l => {
     try {
       const d = new Date(l.date);
       const now = new Date();
       if (period === 'Today') return format(d, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
       if (period === 'Week') return isAfter(d, startOfWeek(now, { weekStartsOn: 1 }));
       if (period === 'Month') return isAfter(d, startOfMonth(now));
-      return true; // All
-    } catch { return true; }
-  });
+      return false;
+    } catch { return false; }
+  }), [allLogs, period]);
 
-  // Records for focus (either the whole period or a specific selected day)
-  const focusLogs = filteredLogs.filter(l => (l.date || '').substring(0, 10) === selectedDay);
+  const focusLogs = useMemo(() => filteredLogs.filter(l => (l.date || '').substring(0, 10) === selectedDay), [filteredLogs, selectedDay]);
 
-  // Group by class (for the selected focus day)
-  const classSummary: Record<string, { logs: any[]; className: string; markedBy: string; advisorImage?: string }> = {};
-  focusLogs.forEach(l => {
-    const cn = l.className || 'Unknown';
-    if (!classSummary[cn]) {
-      classSummary[cn] = { logs: [], className: cn, markedBy: l.markedBy, advisorImage: l.advisorImage };
-    }
-    classSummary[cn].logs.push(l);
-  });
-
-  const classReports = Object.values(classSummary).map(c => {
-    const totalP = c.logs.reduce((s, l) => s + (l.present || 0), 0);
-    const totalA = c.logs.reduce((s, l) => s + (l.absent || 0), 0);
-    const totalO = c.logs.reduce((s, l) => s + (l.onDuty || 0), 0);
-    const total = totalP + totalA + totalO;
-    const rate = total > 0 ? Math.round(((totalP + totalO) / total) * 100) : 0;
-    return { 
-      className: c.className, 
-      markedBy: c.markedBy, 
-      advisorImage: c.advisorImage,
-      present: totalP, 
-      absent: totalA, 
-      onDuty: totalO, 
-      total, 
-      rate, 
-      sessions: c.logs.length 
-    };
-  });
-
-  // We calculate totals for the focus day
-  const dayTotals = focusLogs.reduce((s, l) => ({
+  const dayTotals = useMemo(() => focusLogs.reduce((s, l) => ({
     p: s.p + (l.present || 0),
     a: s.a + (l.absent || 0),
     o: s.o + (l.onDuty || 0),
     tot: s.tot + (l.totalStudents || (l.present + l.absent + (l.onDuty || 0))),
     sess: s.sess + 1
-  }), { p: 0, a: 0, o: 0, tot: 0, sess: 0 });
+  }), { p: 0, a: 0, o: 0, tot: 0, sess: 0 }), [focusLogs]);
 
-  const dayGrandRate = dayTotals.tot > 0
-    ? Math.round(((dayTotals.p + dayTotals.o) / dayTotals.tot) * 100) : 0;
+  const dayGrandRate = useMemo(() => dayTotals.tot > 0
+    ? Math.round(((dayTotals.p + dayTotals.o) / dayTotals.tot) * 100) : 0, [dayTotals]);
+
+  // Calculate marking completion
+  const markingCompletion = useMemo(() => {
+    if (stats.totalClasses === 0) return 0;
+    return Math.round((dayTotals.sess / stats.totalClasses) * 100);
+  }, [dayTotals.sess, stats.totalClasses]);
+
+  // 2. Group by class
+  const classReports = useMemo(() => {
+    const classSummary: Record<string, { logs: any[]; className: string; markedBy: string; advisorImage?: string }> = {};
+    focusLogs.forEach(l => {
+      const cn = l.className || 'Unknown';
+      if (!classSummary[cn]) {
+        classSummary[cn] = { logs: [], className: cn, markedBy: l.markedBy, advisorImage: l.advisorImage };
+      }
+      classSummary[cn].logs.push(l);
+    });
+
+    return Object.values(classSummary).map(c => {
+      const totalP = c.logs.reduce((s, l) => s + (l.present || 0), 0);
+      const totalA = c.logs.reduce((s, l) => s + (l.absent || 0), 0);
+      const totalO = c.logs.reduce((s, l) => s + (l.onDuty || 0), 0);
+      const total = totalP + totalA + totalO;
+      const rate = total > 0 ? Math.round(((totalP + totalO) / total) * 100) : 0;
+      return { 
+        className: c.className, 
+        markedBy: c.markedBy, 
+        advisorImage: c.advisorImage,
+        present: totalP, 
+        absent: totalA, 
+        onDuty: totalO, 
+        total, 
+        rate, 
+        sessions: c.logs.length 
+      };
+    });
+  }, [focusLogs]);
+
+  // 3. Effects
+  useEffect(() => {
+    if (!loading) {
+      progress.value = withDelay(500, withTiming(dayGrandRate / 100, {
+        duration: 1500,
+        easing: Easing.out(Easing.exp)
+      }));
+    }
+  }, [loading, dayGrandRate, progress]);
+
+  const animatedProps = useAnimatedProps(() => {
+    const circumference = 2 * Math.PI * 45;
+    return {
+      strokeDashoffset: circumference - progress.value * circumference,
+    };
+  });
 
   // Trend line from daily totals - Custom grouping based on period
   const dailyPoints = useMemo(() => {
@@ -236,32 +266,7 @@ export default function DeanReports() {
       return weeks;
     }
 
-    // FALLBACK: ALL - Last 30 days daily with dates
-    const dailyMap: Record<string, {p: number, a: number, o: number, date: string}> = {};
-    for (let i = 30; i >= 0; i--) {
-      const dKey = format(subDays(now, i), 'yyyy-MM-dd');
-      dailyMap[dKey] = { p: 0, a: 0, o: 0, date: dKey };
-    }
-    allLogs.forEach(l => {
-      const dKey = (l.date || l.timestamp || '').substring(0, 10);
-      if (dailyMap[dKey]) {
-        dailyMap[dKey].p += (l.present || 0);
-        dailyMap[dKey].a += (l.absent || 0);
-        dailyMap[dKey].o += (l.onDuty || 0);
-      }
-    });
-
-    return Object.values(dailyMap).sort((a,b) => a.date.localeCompare(b.date)).map(v => {
-      const t = v.p + v.a + v.o;
-      const rate = t > 0 ? Math.round(((v.p + v.o) / t) * 100) : 0;
-      const d = new Date(v.date);
-      return {
-        rate,
-        label: format(d, 'EEE dd').toLowerCase(),
-        day: format(d, 'EEE'),
-        fullDate: v.date
-      };
-    });
+    return [];
   }, [allLogs, period]);
 
   const svgW = width - 48; // Wider chart
@@ -320,56 +325,133 @@ export default function DeanReports() {
 
   return (
     <View style={styles.root}>
-      {/* Header */}
-      <LinearGradient colors={['#0F172A', '#1E293B']}
-        style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.topBar}>
-          <View>
-            <Text style={styles.headerSub}>Dean Portal</Text>
-            <Text style={styles.headerTitle}>Reports & Analytics</Text>
+      {/* ── Premium Header ── */}
+      <View style={styles.headerContainer}>
+        <LinearGradient colors={gradients.premium as any} style={[styles.headerGradient, { paddingTop: insets.top + 10 }]}>
+          
+          <View style={styles.topBar}>
+            <Animated.View entering={FadeInDown.delay(100).duration(800)}>
+              <Text style={styles.welcomeTxt}>Report Center</Text>
+              <Text style={styles.headerTitle}>Attendance Analysis</Text>
+            </Animated.View>
+            <View style={styles.headerActions}>
+              <Pressable onPress={downloadReport} style={styles.actionBtn}>
+                <Download size={20} color="#FFF" />
+              </Pressable>
+              <Pressable onPress={fetchData} style={styles.actionBtn}>
+                <RefreshCcw size={20} color="#FFF" />
+              </Pressable>
+            </View>
           </View>
-          <Pressable onPress={downloadReport} style={[styles.dlBtn, downloading && { opacity: 0.6 }]} disabled={downloading}>
-            {downloading
-              ? <ActivityIndicator color="#FFF" size="small" />
-              : <>
-                  <MaterialIcons name="download" size={18} color="#FFF" />
-                  <Text style={styles.dlBtnText}>Export All</Text>
-                </>
-            }
-          </Pressable>
-        </View>
 
-        {/* Period Filters */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}
-          contentContainerStyle={styles.filterRow}>
-          {(['Today', 'Week', 'Month', 'All'] as Period[]).map(p => (
-            <Pressable key={p} onPress={() => setPeriod(p)}
-              style={[styles.pill, period === p && styles.pillActive]}>
-              <Text style={[styles.pillText, period === p && styles.pillTextActive]}>{p}</Text>
+          <View style={styles.headerMainContent}>
+            {/* Gauge */}
+            <Animated.View entering={FadeInRight.delay(200).duration(1000)} style={styles.gaugeSection}>
+              <Svg height="120" width="120" viewBox="0 0 100 100">
+                <Circle cx="50" cy="50" r="45" stroke="rgba(255,255,255,0.1)" strokeWidth="6" fill="none" />
+                <AnimatedCircle
+                  cx="50" cy="50" r="45"
+                  stroke="#10B981"
+                  strokeWidth="8"
+                  fill="none"
+                  strokeDasharray={`${2 * Math.PI * 45}`}
+                  animatedProps={animatedProps}
+                  strokeLinecap="round"
+                  transform="rotate(-90 50 50)"
+                />
+                <SvgText x="50" y="48" fontSize="22" fontWeight="900" fill="#FFF" textAnchor="middle">
+                  {loading ? '—' : `${dayGrandRate}%`}
+                </SvgText>
+                <SvgText x="50" y="65" fontSize="8" fontWeight="600" fill="rgba(255,255,255,0.4)" textAnchor="middle">
+                  ATTENDANCE
+                </SvgText>
+              </Svg>
+            </Animated.View>
+
+            {/* Quick Stats Grid */}
+            <View style={styles.headerStatsGrid}>
+              <Animated.View entering={FadeInDown.delay(300).duration(800)} style={styles.headerStatCard}>
+                <BadgeCheck size={16} color="#10B981" />
+                <Text style={styles.headerStatVal}>{markingCompletion}%</Text>
+                <Text style={styles.headerStatLbl}>MarkingDone</Text>
+              </Animated.View>
+              <Animated.View entering={FadeInDown.delay(400).duration(800)} style={styles.headerStatCard}>
+                <Users size={16} color="rgba(255,255,255,0.4)" />
+                <Text style={styles.headerStatVal}>{dayTotals.p}</Text>
+                <Text style={styles.headerStatLbl}>Present</Text>
+              </Animated.View>
+              <Animated.View entering={FadeInDown.delay(500).duration(800)} style={styles.headerStatCard}>
+                <AlertCircle size={16} color="rgba(255,255,255,0.4)" />
+                <Text style={styles.headerStatVal}>{dayTotals.a}</Text>
+                <Text style={styles.headerStatLbl}>Absent</Text>
+              </Animated.View>
+              <Animated.View entering={FadeInDown.delay(600).duration(800)} style={styles.headerStatCard}>
+                <School size={16} color="rgba(255,255,255,0.4)" />
+                <Text style={styles.headerStatVal}>{stats.totalClasses}</Text>
+                <Text style={styles.headerStatLbl}>Total Cls</Text>
+              </Animated.View>
+            </View>
+          </View>
+        </LinearGradient>
+
+        {/* Floating Filter Pills */}
+        <Animated.View entering={FadeInUp.delay(600).duration(800)} style={[styles.floatingFilters, shadows.premium]}>
+          {(['Today', 'Week', 'Month'] as Period[]).map((p, idx) => (
+            <Pressable key={p} onPress={() => {
+              setPeriod(p);
+              if (p === 'Today') setSelectedDay(format(new Date(), 'yyyy-MM-dd'));
+            }}
+              style={[styles.filterPill, period === p && styles.filterPillActive]}>
+              <Text style={[styles.filterPillText, period === p && styles.filterPillTextActive]}>{p}</Text>
             </Pressable>
           ))}
-        </ScrollView>
-      </LinearGradient>
+        </Animated.View>
+      </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {/* Overview row - FOCUSING ON THE SELECTED DAY */}
-        <View style={styles.secRow}>
-          <Text style={styles.secTitle}>Daily Overview</Text>
-          <Text style={styles.secSubtitle}>{format(new Date(selectedDay), 'dd MMM yyyy')}</Text>
-        </View>
+        {/* Day Header */}
+        <Animated.View entering={FadeInDown.delay(700).duration(800)} style={styles.dayHeader}>
+          <View>
+            <Text style={styles.secTitle}>Daily Overview</Text>
+            <Text style={styles.secSubtitle}>{format(new Date(selectedDay), 'EEEE, dd MMMM yyyy')}</Text>
+          </View>
+          <View style={styles.dayAction}>
+             <Calendar size={18} color={colors.primaryBlue} />
+          </View>
+        </Animated.View>
 
-        <View style={styles.overviewRow}>
-          {[
-            { label: 'Sessions', value: dayTotals.sess, color: '#4F46E5', bg: '#EEF2FF' },
-            { label: 'Present', value: dayTotals.p, color: '#059669', bg: '#ECFDF5' },
-            { label: 'Absent', value: dayTotals.a, color: '#EF4444', bg: '#FFF1F2' },
-            { label: 'Rate', value: `${dayGrandRate}%`, color: dayGrandRate >= 75 ? '#059669' : '#EF4444', bg: dayGrandRate >= 75 ? '#ECFDF5' : '#FFF1F2' },
-          ].map(s => (
-            <View key={s.label} style={[styles.ovCard, shadows.sm, { backgroundColor: s.bg }]}>
-              <Text style={[styles.ovVal, { color: s.color }]}>{loading ? '—' : s.value}</Text>
-              <Text style={styles.ovLbl}>{s.label}</Text>
+        <View style={styles.reportSummaryPanel}>
+          <View style={styles.summaryItem}>
+            <View style={styles.summaryIcon}>
+              <Activity size={18} color={colors.primaryBlue} />
             </View>
-          ))}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.summaryLbl}>Marking Status</Text>
+              <Text style={styles.summaryVal}>{dayTotals.sess} of {stats.totalClasses} Classes Done</Text>
+            </View>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: markingCompletion >= 100 ? '#10B981' : '#64748B' }}>
+              {markingCompletion}%
+            </Text>
+          </View>
+          
+          <View style={[styles.summaryDivider, { marginVertical: 12 }]} />
+          
+          <View style={styles.summaryGrid}>
+             <View style={styles.summaryStat}>
+               <Text style={styles.statSubVal}>{dayTotals.p}</Text>
+               <Text style={styles.statSubLbl}>Present</Text>
+             </View>
+             <View style={styles.summaryVerticalDivider} />
+             <View style={styles.summaryStat}>
+               <Text style={styles.statSubVal}>{dayTotals.a}</Text>
+               <Text style={styles.statSubLbl}>Absent</Text>
+             </View>
+             <View style={styles.summaryVerticalDivider} />
+             <View style={styles.summaryStat}>
+               <Text style={styles.statSubVal}>{dayTotals.o}</Text>
+               <Text style={styles.statSubLbl}>On Duty</Text>
+             </View>
+          </View>
         </View>
 
         {/* Trend Chart */}
@@ -380,7 +462,7 @@ export default function DeanReports() {
               <Text style={styles.chartSub}>{dailyPoints.length} day{dailyPoints.length !== 1 ? 's' : ''} in {period.toLowerCase()} period</Text>
             </View>
             <Pressable onPress={fetchData}>
-              <MaterialIcons name="refresh" size={22} color="#94A3B8" />
+              <RefreshCcw size={20} color="#94A3B8" />
             </Pressable>
           </View>
           {loading
@@ -547,7 +629,7 @@ export default function DeanReports() {
           ? <ActivityIndicator color={colors.primaryBlue} style={{ marginVertical: 24 }} />
           : classReports.length === 0
             ? <View style={[styles.emptyCard, shadows.sm]}>
-                <MaterialIcons name="event-note" size={40} color="#CBD5E1" />
+                <FileText size={48} color="#CBD5E1" />
                 <Text style={styles.emptyTitle}>No records for this period</Text>
                 <Text style={styles.emptyDesc}>Switch to a different time filter.</Text>
               </View>
@@ -566,7 +648,7 @@ export default function DeanReports() {
                         {cls.advisorImage ? (
                           <Image source={{ uri: cls.advisorImage }} style={{ width: '100%', height: '100%' }} />
                         ) : (
-                          <MaterialIcons name="class" size={18} color={pal.color} />
+                          <School size={20} color={pal.color} />
                         )}
                       </View>
                       <View style={styles.clsInfo}>
@@ -600,7 +682,7 @@ export default function DeanReports() {
                         <Text style={styles.statVal}>{cls.onDuty}</Text>
                       </View>
                       <Pressable onPress={() => downloadClassReport(cls)} style={styles.miniDlBtn}>
-                        <MaterialIcons name="download" size={16} color={colors.primaryBlue} />
+                        <Download size={16} color={colors.primaryBlue} />
                         <Text style={styles.miniDlText}>PDF</Text>
                       </Pressable>
                     </View>
@@ -633,7 +715,7 @@ export default function DeanReports() {
             </Pressable>
           </View>
           <View style={styles.ctaIconWrap}>
-            <MaterialIcons name="insert-chart" size={80} color="rgba(255,255,255,0.1)" />
+            <TrendingUp size={80} color="rgba(255,255,255,0.1)" />
           </View>
         </LinearGradient>
       </ScrollView>
@@ -642,105 +724,204 @@ export default function DeanReports() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F1F5F9' },
-  header: { paddingBottom: spacing.md },
+  root: { flex: 1, backgroundColor: '#F8FAFC' },
+  // Header
+  headerContainer: {
+    backgroundColor: '#F8FAFC',
+    zIndex: 10,
+  },
+  headerGradient: {
+    paddingBottom: 60,
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
+    paddingHorizontal: spacing.lg,
+  },
   topBar: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', paddingHorizontal: spacing.md, paddingBottom: spacing.sm,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 25,
   },
-  headerSub: { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: '500' },
-  headerTitle: { fontSize: 19, fontWeight: 'bold', color: '#FFF', marginTop: 2 },
-  dlBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: `${colors.primaryBlue}`, paddingHorizontal: 14,
-    paddingVertical: 10, borderRadius: 12,
-  },
-  dlBtnText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
-  filterScroll: { paddingBottom: spacing.sm },
-  filterRow: { paddingHorizontal: spacing.md, gap: spacing.sm },
-  pill: {
-    paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20,
+  welcomeTxt: { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: '600', letterSpacing: 0.5 },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: '#FFF', marginTop: 4, letterSpacing: -0.5 },
+  headerActions: { flexDirection: 'row', gap: 10 },
+  actionBtn: {
+    width: 40, height: 40,
     backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
   },
-  pillActive: { backgroundColor: colors.primaryBlue },
-  pillText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
-  pillTextActive: { color: '#FFF' },
-  body: { paddingHorizontal: spacing.md, paddingTop: spacing.lg, paddingBottom: 160 },
-  overviewRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
-  ovCard: {
-    flex: 1, borderRadius: 14, padding: spacing.sm,
-    alignItems: 'center', gap: 3,
+  headerMainContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 20,
   },
-  ovVal: { fontSize: 18, fontWeight: 'bold' },
-  ovLbl: { fontSize: 9, color: '#64748B', fontWeight: '600' },
+  gaugeSection: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 30,
+    padding: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  headerStatsGrid: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  headerStatCard: {
+    width: '47%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 18,
+    padding: 12,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  headerStatVal: { fontSize: 18, fontWeight: '900', color: '#FFF', marginVertical: 2 },
+  headerStatLbl: { fontSize: 9, color: 'rgba(255,255,255,0.4)', fontWeight: '700', textTransform: 'uppercase' },
+
+  // Floating Filters
+  floatingFilters: {
+    flexDirection: 'row',
+    backgroundColor: '#FFF',
+    marginHorizontal: spacing.xl,
+    borderRadius: 24,
+    padding: 6,
+    marginTop: -28,
+    alignSelf: 'center',
+    width: width - 60,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  filterPill: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 20,
+  },
+  filterPillActive: {
+    backgroundColor: colors.primaryBlue,
+  },
+  filterPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
+  filterPillTextActive: { color: '#FFF' },
+
+  // Body
+  body: { paddingHorizontal: spacing.lg, paddingTop: 35, paddingBottom: 100 },
+  dayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+    paddingHorizontal: 4,
+  },
+  secTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', letterSpacing: -0.5 },
+  secSubtitle: { fontSize: 13, color: '#64748B', marginTop: 4, fontWeight: '500' },
+  dayAction: {
+    width: 36, height: 36,
+    backgroundColor: `${colors.primaryBlue}10`,
+    borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center',
+  },
+
+  reportSummaryPanel: {
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 25,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  summaryItem: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  summaryIcon: { 
+    width: 36, height: 36, borderRadius: 10, 
+    backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' 
+  },
+  summaryLbl: { fontSize: 11, color: '#64748B', fontWeight: '700', textTransform: 'uppercase' },
+  summaryVal: { fontSize: 14, fontWeight: '800', color: '#1E293B', marginTop: 1 },
+  summaryDivider: { height: 1, backgroundColor: '#F1F5F9' },
+  summaryGrid: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  summaryStat: { alignItems: 'center', flex: 1 },
+  statSubVal: { fontSize: 18, fontWeight: '900', color: '#1E293B' },
+  statSubLbl: { fontSize: 10, color: '#64748B', fontWeight: '700' },
+  summaryVerticalDivider: { width: 1, height: 25, backgroundColor: '#F1F5F9' },
+
   chartCard: {
-    backgroundColor: '#FFF', borderRadius: borderRadius.xl,
-    padding: spacing.md, marginBottom: spacing.xl,
+    backgroundColor: '#FFF', borderRadius: 28,
+    padding: 20, marginBottom: 25,
+    borderWidth: 1, borderColor: '#F1F5F9',
   },
   chartTop: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'flex-start', marginBottom: spacing.md,
+    alignItems: 'flex-start', marginBottom: 20,
   },
-  chartTitle: { fontSize: 16, fontWeight: 'bold', color: '#0F172A' },
-  chartSub: { fontSize: 11, color: '#64748B', marginTop: 2 },
-  secRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 12, paddingHorizontal: 4 },
-  secTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B', letterSpacing: -0.3 },
-  secSubtitle: { fontSize: 13, fontWeight: '600', color: '#64748B' },
+  chartTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  chartSub: { fontSize: 12, color: '#64748B', marginTop: 3 },
+  
+  secRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 15 },
   countPill: {
-    backgroundColor: colors.primaryBlue, paddingHorizontal: 10,
-    paddingVertical: 3, borderRadius: 20,
+    backgroundColor: `${colors.primaryBlue}10`, paddingHorizontal: 12,
+    paddingVertical: 5, borderRadius: 12,
   },
-  countPillText: { fontSize: 11, fontWeight: 'bold', color: '#FFF' },
+  countPillText: { fontSize: 12, fontWeight: '900', color: colors.primaryBlue },
+
   emptyCard: {
-    backgroundColor: '#FFF', borderRadius: borderRadius.xl,
-    padding: spacing.xl, alignItems: 'center', gap: spacing.sm,
+    backgroundColor: '#FFF', borderRadius: 24,
+    padding: 40, alignItems: 'center', gap: 12,
+    borderWidth: 1, borderColor: '#F1F5F9',
   },
-  emptyTitle: { fontSize: 15, fontWeight: 'bold', color: '#0F172A' },
-  emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
+  emptyTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
+  emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center', lineHeight: 18 },
+
   clsCard: {
-    backgroundColor: '#FFF', borderRadius: borderRadius.xl,
-    padding: spacing.md, marginBottom: spacing.sm,
+    backgroundColor: '#FFF', borderRadius: 24,
+    padding: 16, marginBottom: 15,
+    borderWidth: 1, borderColor: '#F1F5F9',
   },
-  clsTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
-  clsBadge: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  clsTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  clsBadge: { width: 44, height: 44, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
   clsInfo: { flex: 1 },
-  clsName: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  clsMeta: { fontSize: 11, color: '#64748B', marginTop: 2 },
-  rateBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
-  rateText: { fontSize: 13, fontWeight: 'bold' },
+  clsName: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  clsMeta: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  rateBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  rateText: { fontSize: 12, fontWeight: '900' },
+  
   clsStats: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    marginBottom: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: 15,
+    marginBottom: 16,
   },
-  stuStatItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  statDot: { width: 8, height: 8, borderRadius: 4 },
-  statLbl: { fontSize: 11, color: '#64748B' },
-  statVal: { fontSize: 12, fontWeight: 'bold', color: '#0F172A' },
+  stuStatItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statDot: { width: 7, height: 7, borderRadius: 4 },
+  statLbl: { fontSize: 11, color: '#64748B', fontWeight: '500' },
+  statVal: { fontSize: 12, fontWeight: '800', color: '#1E293B' },
   miniDlBtn: {
     marginLeft: 'auto',
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 5,
-    backgroundColor: `${colors.primaryBlue}10`,
-    borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 6,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1, borderColor: '#E2E8F0',
   },
-  miniDlText: { fontSize: 11, fontWeight: 'bold', color: colors.primaryBlue },
+  miniDlText: { fontSize: 11, fontWeight: '800', color: '#64748B' },
   attBarBg: {
-    height: 5, backgroundColor: '#F1F5F9',
+    height: 6, backgroundColor: '#F1F5F9',
     borderRadius: 3, overflow: 'hidden',
   },
   attBarFill: { height: '100%', borderRadius: 3 },
+
   ctaCard: {
-    borderRadius: borderRadius.xl, marginTop: spacing.xl,
+    borderRadius: 28, marginTop: 20,
     overflow: 'hidden', position: 'relative',
   },
-  ctaContent: { padding: spacing.xl, zIndex: 1 },
-  ctaTitle: { fontSize: 18, fontWeight: 'bold', color: '#FFF', marginBottom: 8 },
-  ctaDesc: { fontSize: 13, color: 'rgba(255,255,255,0.8)', lineHeight: 18, marginBottom: 20 },
+  ctaContent: { padding: 24, zIndex: 1 },
+  ctaTitle: { fontSize: 20, fontWeight: '900', color: '#FFF', marginBottom: 6 },
+  ctaDesc: { fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 18, marginBottom: 20 },
   ctaBtn: {
-    backgroundColor: '#FFF', paddingHorizontal: 22,
-    paddingVertical: 10, borderRadius: 10, alignSelf: 'flex-start',
+    backgroundColor: '#FFF', paddingHorizontal: 25,
+    paddingVertical: 12, borderRadius: 14, alignSelf: 'flex-start',
   },
-  ctaBtnText: { color: colors.primaryBlue, fontWeight: 'bold', fontSize: 14 },
-  ctaIconWrap: { position: 'absolute', right: -10, bottom: -10, opacity: 0.5 },
-  gridLabel: { fontSize: 9, color: '#94A3B8' },
+  ctaBtnText: { color: colors.primaryBlue, fontWeight: '900', fontSize: 14 },
+  ctaIconWrap: { position: 'absolute', right: -15, bottom: -15, opacity: 0.15 },
 });
