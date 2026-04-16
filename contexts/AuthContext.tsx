@@ -25,17 +25,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = async () => {
     try {
       setLoading(true);
-      // Wait for Supabase to recover session first
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      
       const currentUser = await authService.getCurrentUser();
-      if (authUser && currentUser) {
+      
+      if (currentUser?.isVirtual) {
         setUser(currentUser);
-      } else if (!authUser) {
-        // Session died or expired
-        setUser(null);
+      } else if (currentUser) {
+        // Fetch latest profile to check for status changes (like isApproved)
+        const refreshedUser = await authService.refreshProfile(currentUser.id);
+        if (refreshedUser) {
+          setUser(refreshedUser);
+        } else {
+          // If profile fetch fails, fallback to local but check session
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (authUser) {
+            setUser(currentUser);
+          } else {
+            setUser(null);
+          }
+        }
       } else {
-        setUser(currentUser);
+        setUser(null);
       }
     } catch (error) {
       console.error('Failed to load user:', error);
@@ -61,9 +70,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProfileImage = async (imageUri: string | null) => {
-    await authService.updateProfileImage(imageUri);
+    const uploadedUrl = await authService.updateProfileImage(imageUri);
     if (user) {
-      setUser({ ...user, profileImage: imageUri });
+      setUser({ ...user, profileImage: uploadedUrl || imageUri });
     }
   };
 

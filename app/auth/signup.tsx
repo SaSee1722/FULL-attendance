@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Platform, ScrollView, Modal, FlatList } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { useAlert } from '@/template';
@@ -12,7 +12,8 @@ export default function SignupScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<UserRole>('staff');
+  const { role } = useLocalSearchParams<{ role: UserRole }>();
+  const [selectedRole, setSelectedRole] = useState<UserRole>(role || 'hod');
   const [department, setDepartment] = useState('');
   const [showDeptModal, setShowDeptModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -31,11 +32,6 @@ export default function SignupScreen() {
     'Electrical Engineering',
   ];
 
-  const roles: { value: UserRole; label: string; }[] = [
-    { value: 'admin', label: 'Office Admin' },
-    { value: 'dean', label: 'Dean' },
-    { value: 'staff', label: 'Advisor' },
-  ];
 
   const handleSignup = async () => {
     if (!name || !email || !password) {
@@ -43,33 +39,35 @@ export default function SignupScreen() {
       return;
     }
 
-    if ((selectedRole === 'dean' || selectedRole === 'staff') && !department) {
+    if ((selectedRole === 'hod' || selectedRole === 'staff') && !department) {
       showAlert('Error', 'Please select a department');
       return;
     }
 
     setLoading(true);
     try {
-      await signup(email, password, name, selectedRole, department);
+      await signup(email, password, name, selectedRole, department || undefined);
       
       switch (selectedRole) {
         case 'admin':
           router.replace('/(admin)');
           break;
-        case 'dean':
-          router.replace('/(dean)');
+        case 'hod':
+          router.replace('/(hod)');
           break;
         case 'staff':
           router.replace('/(staff)');
           break;
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Signup error:', error);
-      showAlert('Signup Failed', error instanceof Error ? error.message : 'Failed to create account');
+      const msg = error?.message || error?.error_description || 'Failed to create account';
+      showAlert('Signup Failed', msg);
     } finally {
       setLoading(false);
     }
   };
+
 
   return (
     <KeyboardAvoidingView
@@ -91,47 +89,26 @@ export default function SignupScreen() {
       >
         <Text style={styles.title}>Join our portal</Text>
         <Text style={styles.subtitle}>
-          Select your role and enter details to get started with college attendance management.
+          Enter your details to register as a {selectedRole === 'admin' ? 'Office Admin' : 'Head of Department'}. 
+          {"\n\n"}
+          <Text style={{ fontWeight: '700', color: colors.primaryBlue }}>Note to Advisors:</Text> Please contact your HOD to receive your Login ID and Password. Public signup is restricted for staff.
         </Text>
 
         <View style={styles.form}>
-          <Text style={styles.sectionLabel}>SELECT ROLE</Text>
-          <View style={styles.roleSelector}>
-            {roles.map((role) => {
-              const isActive = selectedRole === role.value;
-              return (
-                <Pressable
-                  key={role.value}
-                  onPress={() => setSelectedRole(role.value)}
-                  style={[
-                    styles.roleItem,
-                    isActive && styles.roleItemActive,
-                  ]}
-                >
-                  <Text style={[
-                    styles.roleText,
-                    isActive && styles.roleTextActive
-                  ]}>
-                    {role.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
 
           <Text style={styles.inputLabel}>Full Name</Text>
           <View style={styles.inputWrapper}>
             <MaterialIcons name="person-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="Dr. Jane Smith"
+              placeholder={selectedRole === 'admin' ? "John Doe" : "Dr. Jane Smith"}
               placeholderTextColor={colors.textTertiary}
               value={name}
               onChangeText={setName}
             />
           </View>
 
-          {(selectedRole === 'dean' || selectedRole === 'staff') && (
+          {(selectedRole === 'hod' || selectedRole === 'staff') && (
             <>
               <Text style={styles.inputLabel}>Department</Text>
               <Pressable 
@@ -141,6 +118,7 @@ export default function SignupScreen() {
                 <MaterialIcons name="account-balance" size={20} color={colors.textTertiary} style={styles.inputIcon} />
                 <Text style={[
                   styles.input, 
+                  { flex: 1, paddingVertical: 0, textAlignVertical: 'center' }, // Ensure no internal padding pushes text
                   !department && { color: colors.textTertiary }
                 ]}>
                   {department || "Choose your department"}
@@ -353,6 +331,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     marginBottom: spacing.lg,
     paddingHorizontal: spacing.md,
+    minHeight: 56,
   },
   inputIcon: {
     marginRight: spacing.sm,
@@ -360,8 +339,12 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     ...typography.body,
-    paddingVertical: spacing.md,
     color: colors.textPrimary,
+    marginLeft: spacing.xs,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    paddingVertical: 0,
+    height: '100%',
   },
   rightIcon: {
     padding: spacing.xs,

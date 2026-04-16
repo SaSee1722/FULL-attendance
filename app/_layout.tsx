@@ -13,7 +13,7 @@ export default function RootLayout() {
             <Stack.Screen name="auth/login" />
             <Stack.Screen name="auth/signup" />
             <Stack.Screen name="(admin)" />
-            <Stack.Screen name="(dean)" />
+            <Stack.Screen name="(hod)" />
             <Stack.Screen name="(staff)" />
             <Stack.Screen name="class-detail/[id]" />
           </Stack>

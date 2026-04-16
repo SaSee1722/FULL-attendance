@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, Animated, StatusBar, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../hooks/useAuth';
 import { typography, spacing, shadows, colors } from '../constants/theme';
 
@@ -47,8 +46,8 @@ export default function SplashScreen() {
             case 'admin':
               router.replace('/(admin)');
               break;
-            case 'dean':
-              router.replace('/(dean)');
+            case 'hod':
+              router.replace('/(hod)');
               break;
             case 'staff':
               router.replace('/(staff)');
@@ -96,13 +95,17 @@ export default function SplashScreen() {
               style={styles.logoOuter}
             >
               <View style={styles.logoInner}>
-                <MaterialIcons name="auto-awesome" size={64} color="#FFFFFF" />
+                <Image 
+                  source={require('../assets/images/logo.png')} 
+                  style={{ width: 80, height: 80 }} 
+                  resizeMode="contain" 
+                />
               </View>
             </LinearGradient>
           </View>
           
-          <Text style={styles.title}>GOAT Attendance</Text>
-          <Text style={styles.subtitle}>Streamlining Excellence in Education</Text>
+          <Text style={styles.title}>AttendX</Text>
+          <Text style={styles.subtitle}>Efficiency, Redefined</Text>
           
           <View style={styles.loaderContainer}>
             <View style={styles.loaderTrack}>

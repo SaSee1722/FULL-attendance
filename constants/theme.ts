@@ -21,9 +21,9 @@ export const colors = {
   admin: '#0a192f',
   adminLight: '#f1f5f9',
   adminDark: '#050c18',
-  dean: '#1152d4',
-  deanLight: '#eff6ff',
-  deanDark: '#0e41a9',
+  hod: '#1152d4',
+  hodLight: '#eff6ff',
+  hodDark: '#0e41a9',
   staff: '#1152d4', 
   staffLight: '#eff6ff',
   staffDark: '#0e41a9',
@@ -62,7 +62,7 @@ export const colors = {
 
 export const gradients = {
   admin: [colors.admin, colors.adminDark],
-  dean: ['#0F172A', '#1E293B'],
+  hod: ['#0F172A', '#1E293B'],
   staff: ['#1152D4', '#0E41A9'],
   surface: ['#FFFFFF', '#F8FAFC'],
   glass: ['rgba(255, 255, 255, 0.2)', 'rgba(255, 255, 255, 0.05)'],

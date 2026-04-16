@@ -10,10 +10,10 @@ CREATE TABLE IF NOT EXISTS public.holidays (
 
 ALTER TABLE public.holidays ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Holidays viewable by department staff/dean" ON public.holidays;
-DROP POLICY IF EXISTS "Deans can manage holidays" ON public.holidays;
+DROP POLICY IF EXISTS "Holidays viewable by department staff/hod" ON public.holidays;
+DROP POLICY IF EXISTS "HODs can manage holidays" ON public.holidays;
 
-CREATE POLICY "Holidays viewable by department staff/dean" 
+CREATE POLICY "Holidays viewable by department staff/hod" 
 ON public.holidays FOR SELECT 
 USING (
   EXISTS (
@@ -23,13 +23,13 @@ USING (
   )
 );
 
-CREATE POLICY "Deans can manage holidays" 
+CREATE POLICY "HODs can manage holidays" 
 ON public.holidays FOR ALL 
 USING (
   EXISTS (
     SELECT 1 FROM public.profiles p 
     WHERE p.id = auth.uid() 
-    AND p.role = 'dean' 
+    AND p.role = 'hod' 
     AND p.department = holidays.department
   )
 );

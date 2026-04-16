@@ -4,6 +4,7 @@ import {
   Modal, Alert, ActivityIndicator, KeyboardAvoidingView,
   Platform, FlatList, Image,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -12,8 +13,21 @@ import { dataService, ClassData, Student, StaffMember } from '../../services/dat
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, shadows, borderRadius } from '../../constants/theme';
 
+// ── CSV Parser ────────────────────────────────────────────────
+function parseCSV(raw: string): { rollNo: string; name: string }[] {
+  return raw
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.toLowerCase().startsWith('register') && !l.toLowerCase().startsWith('roll'))
+    .map(l => {
+      const parts = l.split(',').map(p => p.trim());
+      return { rollNo: parts[0] || '', name: parts.slice(1).join(' ').trim() || '' };
+    })
+    .filter(r => r.rollNo && r.name);
+}
+
 // ── Patch: update class in supabase ─────────────────────────
-const patchClass = async (id: string, payload: { name?: string; advisor?: string }) => {
+const patchClass = async (id: string, payload: Record<string, any>) => {
   const { error } = await supabase.from('classes').update(payload).eq('id', id);
   if (error) throw error;
 };
@@ -44,7 +58,7 @@ const chipStyles = StyleSheet.create({
 });
 
 // ── MAIN COMPONENT ───────────────────────────────────────────
-export default function DeanManagement() {
+export default function HODManagement() {
   const insets = useSafeAreaInsets();
   const { user, loading: authLoading } = useAuth();
 
@@ -84,6 +98,77 @@ export default function DeanManagement() {
   const [editingStu, setEditingStu] = useState<Student | null>(null);
   const [stuName, setStuName] = useState('');
   const [stuRoll, setStuRoll] = useState('');
+
+  // ── CSV import state ──
+  const [csvModal, setCsvModal] = useState(false);
+  const [csvClassId, setCsvClassId] = useState('');
+  const [csvText, setCsvText] = useState('');
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvPreview, setCsvPreview] = useState<{ rollNo: string; name: string }[]>([]);
+
+  // ── Standalone Create Staff modal ──
+  const [createStaffModal, setCreateStaffModal] = useState(false);
+  const [csName, setCsName] = useState('');
+  const [csId, setCsId] = useState('');
+  const [csPass, setCsPass] = useState('');
+  const [csSubmitting, setCsSubmitting] = useState(false);
+
+  // ── Detail sheet (Classes / Students / Staff chips) ──
+  const [detailSheet, setDetailSheet] = useState<'classes' | 'students' | 'staff' | null>(null);
+
+  // ── Staff credentials viewer ──
+  const [credModal, setCredModal] = useState(false);
+  const [selectedStaffCred, setSelectedStaffCred] = useState<StaffMember | null>(null);
+  const [copiedField, setCopiedField] = useState<'id' | 'pass' | null>(null);
+
+  const showStaffCred = (sf: StaffMember) => {
+    setSelectedStaffCred(sf);
+    setCredModal(true);
+    setCopiedField(null);
+  };
+
+  const copyToClipboard = async (textToCopy: string, field: 'id' | 'pass') => {
+    try {
+      if (!textToCopy) return;
+      const cleanText = String(textToCopy).trim();
+      await Clipboard.setStringAsync(cleanText);
+      
+      // Visual feedback in UI
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 2000);
+      
+      // Confirm with a small alert to verify the app is getting the right data
+      Alert.alert('Copied to Clipboard', `Value: ${cleanText}`);
+    } catch (error) {
+      console.error('Clipboard error:', error);
+      Alert.alert('Copy Failed', 'Please try copying again or take a screenshot.');
+    }
+  };
+
+  // Auto-generate Staff ID + Password from name
+  const generateCredentials = (name: string) => {
+    if (!name.trim()) { setCsId(''); setCsPass(''); return; }
+    // Staff ID: initials + year + random 3-digit number
+    const initials = name.trim().split(' ').map(w => w[0]?.toUpperCase() || '').join('');
+    const year = new Date().getFullYear().toString().slice(-2);
+    const rand3 = String(Math.floor(100 + Math.random() * 900));
+    setCsId(`${initials}-${year}-${rand3}`);
+    // Password: 8 chars alphanumeric
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    const pwd = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    setCsPass(pwd);
+  };
+
+  const handleCsNameChange = (text: string) => {
+    setCsName(text);
+    generateCredentials(text);
+  };
+
+  // ── Staff creation state (wizard) ──
+  const [staffMode, setStaffMode] = useState<'pick' | 'create'>('create');
+  const [newStaffId, setNewStaffId] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffPass, setNewStaffPass] = useState('123456'); // Default password
 
   const fetchAll = useCallback(async () => {
     if (authLoading || !user) return;
@@ -138,6 +223,66 @@ export default function DeanManagement() {
     setSelectedStaff(null);
     setCreatedClass(null);
     setWizardOpen(false);
+    setStaffMode('create');
+    setNewStaffId('');
+    setNewStaffName('');
+    setNewStaffPass('123456');
+  };
+
+  // ── Open CSV import ─────────────────────────────────────────
+  const openCsvImport = (classId: string) => {
+    setCsvClassId(classId);
+    setCsvText('');
+    setCsvPreview([]);
+    setCsvModal(true);
+  };
+
+  // ── Parse CSV preview ───────────────────────────────────────
+  const handleCsvChange = (text: string) => {
+    setCsvText(text);
+    setCsvPreview(parseCSV(text));
+  };
+
+  // ── Bulk import CSV students ────────────────────────────────
+  const handleCsvImport = async () => {
+    if (csvPreview.length === 0) {
+      Alert.alert('Empty', 'Paste CSV data in the format: register_number,name'); return;
+    }
+    setCsvImporting(true);
+    let success = 0; let fail = 0;
+    for (const row of csvPreview) {
+      try {
+        const added = await dataService.addStudent({ name: row.name, rollNo: row.rollNo, classId: csvClassId });
+        setStudents(p => ({ ...p, [csvClassId]: [added, ...(p[csvClassId] || [])] }));
+        success++;
+      } catch { fail++; }
+    }
+    setCsvImporting(false);
+    setCsvModal(false);
+    Alert.alert('Import Complete', `✅ ${success} students imported${fail > 0 ? `\n⚠️ ${fail} failed (duplicate roll numbers)` : ''}`);
+  };
+
+  // ── Standalone Create Staff ──────────────────────────────────
+  const handleCreateStaff = async () => {
+    if (!csName.trim() || !csId.trim() || !csPass.trim()) {
+      Alert.alert('Required', 'All fields are required.'); return;
+    }
+    setCsSubmitting(true);
+    try {
+      await dataService.createManagedStaff({
+        staff_id: csId.trim(),
+        name: csName.trim(),
+        password: csPass.trim(),
+        department: user?.department || '',
+      });
+      const sf = await dataService.getStaffMembers();
+      setStaffList(sf);
+      setCreateStaffModal(false);
+      setCsName(''); setCsId(''); setCsPass('123456');
+      Alert.alert('Success', `Staff "${csName.trim()}" created with ID: ${csId.trim()}`);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to create staff.');
+    } finally { setCsSubmitting(false); }
   };
 
   // ── Step 1 → create class ──────────────────────────────────
@@ -162,14 +307,44 @@ export default function DeanManagement() {
     } finally { setSubmitting(false); }
   };
 
-  // ── Step 2 → assign staff ─────────────────────────────────
+  // ── Step 2 → create/assign staff ─────────────────────────
   const handleStep2 = async () => {
-    if (!selectedStaff) { Alert.alert('Required', 'Please select a staff member.'); return; }
     try {
       setSubmitting(true);
-      await patchClass(createdClass!.id, { advisor: selectedStaff.name });
-      setCreatedClass(c => c ? { ...c, advisor: selectedStaff.name } : c);
-      setClasses(p => p.map(c => c.id === createdClass!.id ? { ...c, advisor: selectedStaff.name } : c));
+      let staffName = '';
+      let staffIdForCls = '';
+
+      if (staffMode === 'create') {
+        if (!newStaffId.trim() || !newStaffName.trim() || !newStaffPass.trim()) {
+          Alert.alert('Required', 'Please fill all staff fields.');
+          return;
+        }
+        const managed = await dataService.createManagedStaff({
+          staff_id: newStaffId.trim(),
+          name: newStaffName.trim(),
+          password: newStaffPass.trim(),
+          department: user?.department || '',
+        });
+        staffName = managed.name;
+        staffIdForCls = managed.staff_id;
+      } else {
+        if (!selectedStaff) { Alert.alert('Required', 'Please select a staff member.'); return; }
+        staffName = selectedStaff.name;
+        staffIdForCls = selectedStaff.staffId || ''; // Link via Staff ID if available
+      }
+
+      await supabase.from('classes').update({ 
+        advisor: staffName,
+        advisor_staff_id: staffIdForCls 
+      }).eq('id', createdClass!.id);
+
+      setCreatedClass(c => c ? { ...c, advisor: staffName } : c);
+      setClasses(p => p.map(c => c.id === createdClass!.id ? { ...c, advisor: staffName } : c));
+      
+      // Refresh staff list
+      const sf = await dataService.getStaffMembers();
+      setStaffList(sf);
+      
       setStep(3);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to assign staff.'); 
@@ -208,12 +383,21 @@ export default function DeanManagement() {
     if (!editTarget || !editName.trim()) { Alert.alert('Required', 'Class name is required.'); return; }
     try {
       setSubmitting(true);
-      await patchClass(editTarget.id, {
+      const updateData: any = {
         name: editName.trim(),
         advisor: editAdvisor?.name || editTarget.advisor,
-      });
+        advisor_staff_id: editAdvisor?.staffId || editTarget.advisor_staff_id || null
+      };
+
+      await patchClass(editTarget.id, updateData);
+
       setClasses(p => p.map(c => c.id === editTarget.id
-        ? { ...c, name: editName.trim(), advisor: editAdvisor?.name || c.advisor } : c));
+        ? { 
+            ...c, 
+            name: updateData.name, 
+            advisor: updateData.advisor,
+            advisor_staff_id: updateData.advisor_staff_id 
+          } : c));
       setEditModal(false);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to update class.');
@@ -291,41 +475,55 @@ export default function DeanManagement() {
         end={{ x: 1, y: 1 }}
         style={[s.header, { paddingTop: insets.top + 8 }]}
       >
+        {/* Title row */}
         <View style={s.topBar}>
           <View>
             <Text style={s.headerSub}>ADMINISTRATION</Text>
             <Text style={s.headerTitle}>Class Management</Text>
           </View>
-          <Pressable 
-            style={({ pressed }) => [s.createBtn, pressed && { opacity: 0.8, transform: [{ scale: 0.98 }] }]} 
+        </View>
+
+        {/* Action buttons row */}
+        <View style={s.actionRow}>
+          <Pressable
+            style={({ pressed }) => [s.actionBtn2, pressed && { opacity: 0.8 }]}
+            onPress={() => { setCsName(''); setCsId(''); setCsPass(''); setCreateStaffModal(true); }}
+          >
+            <LinearGradient colors={['#0F766E', '#0D9488']} style={s.actionBtnGrad}>
+              <MaterialIcons name="person-add" size={16} color="#FFF" />
+              <Text style={s.actionBtnTxt}>Add Staff</Text>
+            </LinearGradient>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.actionBtn2, pressed && { opacity: 0.8 }]}
             onPress={() => { resetWizard(); setWizardOpen(true); }}
           >
-            <LinearGradient
-              colors={['#1152d4', '#1d4ed8']}
-              style={s.createBtnGradient}
-            >
-              <MaterialIcons name="add-circle-outline" size={20} color="#FFF" />
-              <Text style={s.createBtnText}>New Class</Text>
+            <LinearGradient colors={['#1152d4', '#1d4ed8']} style={s.actionBtnGrad}>
+              <MaterialIcons name="add-circle-outline" size={16} color="#FFF" />
+              <Text style={s.actionBtnTxt}>New Class</Text>
             </LinearGradient>
           </Pressable>
         </View>
 
         <View style={s.statChipsScroll}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.statChips}>
-            <View style={s.chip}>
+            <Pressable style={s.chip} onPress={() => setDetailSheet('classes')}>
               <MaterialIcons name="class" size={14} color="#818CF8" />
               <Text style={s.chipTxt}>{classes.length} <Text style={s.chipBold}>Classes</Text></Text>
-            </View>
-            <View style={s.chip}>
+              <MaterialIcons name="chevron-right" size={14} color="rgba(255,255,255,0.4)" />
+            </Pressable>
+            <Pressable style={s.chip} onPress={() => setDetailSheet('students')}>
               <MaterialIcons name="groups" size={14} color="#34D399" />
               <Text style={s.chipTxt}>
                 {Object.values(students).reduce((a, arr) => a + arr.length, 0)} <Text style={s.chipBold}>Students</Text>
               </Text>
-            </View>
-            <View style={s.chip}>
+              <MaterialIcons name="chevron-right" size={14} color="rgba(255,255,255,0.4)" />
+            </Pressable>
+            <Pressable style={s.chip} onPress={() => setDetailSheet('staff')}>
               <MaterialIcons name="admin-panel-settings" size={14} color="#FBBF24" />
               <Text style={s.chipTxt}>{staffList.length} <Text style={s.chipBold}>Staff</Text></Text>
-            </View>
+              <MaterialIcons name="chevron-right" size={14} color="rgba(255,255,255,0.4)" />
+            </Pressable>
           </ScrollView>
         </View>
       </LinearGradient>
@@ -375,11 +573,9 @@ export default function DeanManagement() {
                           ) : (
                             <LinearGradient
                               colors={[pal.bg, '#FFFFFF']}
-                              style={s.clsBadgeFill}
+                              style={[s.clsBadgeFill, { justifyContent: 'center', alignItems: 'center' }]}
                             >
-                              <Text style={[s.clsBadgeTxt, { color: pal.color }]}>
-                                {cls.name.charAt(0).toUpperCase()}
-                              </Text>
+                              <MaterialIcons name="person" size={24} color={pal.color} />
                             </LinearGradient>
                           )}
                         </View>
@@ -430,10 +626,16 @@ export default function DeanManagement() {
                             <Text style={s.stuSectionTitle}>
                               Students{!stuLoading ? ` (${clsStu.length})` : ''}
                             </Text>
-                            <Pressable onPress={() => openAddStu(cls.id)} style={s.addStuBtn}>
-                              <MaterialIcons name="person-add" size={13} color="#FFF" />
-                              <Text style={s.addStuTxt}>Add Student</Text>
-                            </Pressable>
+                            <View style={{ flexDirection: 'row', gap: 6 }}>
+                              <Pressable onPress={() => openCsvImport(cls.id)} style={[s.addStuBtn, { backgroundColor: '#0F766E' }]}>
+                                <MaterialIcons name="upload-file" size={13} color="#FFF" />
+                                <Text style={s.addStuTxt}>CSV</Text>
+                              </Pressable>
+                              <Pressable onPress={() => openAddStu(cls.id)} style={s.addStuBtn}>
+                                <MaterialIcons name="person-add" size={13} color="#FFF" />
+                                <Text style={s.addStuTxt}>Add</Text>
+                              </Pressable>
+                            </View>
                           </View>
 
                           {stuLoading
@@ -563,57 +765,92 @@ export default function DeanManagement() {
           {/* ── STEP 2: Assign Staff ── */}
           {step === 2 && (
             <View style={wiz.body}>
-              <View style={wiz.content}>
+              <ScrollView contentContainerStyle={wiz.content}>
                 <Text style={wiz.stepTitle}>Assign Staff Advisor</Text>
-                <Text style={wiz.stepSub}>
-                  Choose from registered staff in {user?.department}
-                </Text>
+                <Text style={wiz.stepSub}>Create a new account or choose an existing staff member</Text>
 
-                {staffList.length === 0
-                  ? (
-                    <View style={wiz.noStaff}>
-                      <MaterialIcons name="badge" size={48} color="#CBD5E1" />
-                      <Text style={wiz.noStaffT}>No registered staff found</Text>
-                      <Text style={wiz.noStaffD}>
-                        Staff must sign up with the &quot;{user?.department}&quot; department first.
+                {/* Mode Selector */}
+                <View style={wiz.modeRow}>
+                  <Pressable 
+                    onPress={() => setStaffMode('create')}
+                    style={[wiz.modeBtn, staffMode === 'create' && wiz.modeBtnActive]}
+                  >
+                    <MaterialIcons name="person-add" size={18} color={staffMode === 'create' ? '#FFF' : '#64748B'} />
+                    <Text style={[wiz.modeBtnTxt, staffMode === 'create' && wiz.modeBtnTxtActive]}>New Account</Text>
+                  </Pressable>
+                  <Pressable 
+                    onPress={() => setStaffMode('pick')}
+                    style={[wiz.modeBtn, staffMode === 'pick' && wiz.modeBtnActive]}
+                  >
+                    <MaterialIcons name="people" size={18} color={staffMode === 'pick' ? '#FFF' : '#64748B'} />
+                    <Text style={[wiz.modeBtnTxt, staffMode === 'pick' && wiz.modeBtnTxtActive]}>Existing Staff</Text>
+                  </Pressable>
+                </View>
+
+                {staffMode === 'create' ? (
+                  <View style={wiz.createForm}>
+                    <Text style={wiz.label}>Staff Full Name</Text>
+                    <TextInput style={wiz.input} placeholder="e.g. Dr. Sarah Connor"
+                      value={newStaffName} onChangeText={setNewStaffName} placeholderTextColor="#94A3B8" />
+
+                    <Text style={wiz.label}>Login Staff ID (Unique)</Text>
+                    <TextInput style={wiz.input} placeholder="e.g. ST-2024-001"
+                      value={newStaffId} onChangeText={setNewStaffId} 
+                      autoCapitalize="characters" placeholderTextColor="#94A3B8" />
+
+                    <Text style={wiz.label}>Initial Password</Text>
+                    <TextInput style={wiz.input} placeholder="Enter password"
+                      value={newStaffPass} onChangeText={setNewStaffPass} 
+                      secureTextEntry placeholderTextColor="#94A3B8" />
+                    
+                    <View style={wiz.infoBox}>
+                      <MaterialIcons name="vpn-key" size={16} color={colors.primaryBlue} />
+                      <Text style={wiz.infoTxt}>
+                        This ID and Password will be used by the staff to login to the Staff role.
                       </Text>
                     </View>
-                  )
-                  : (
-                    <FlatList
-                      data={staffList}
-                      keyExtractor={i => i.id}
-                      scrollEnabled={false}
-                      renderItem={({ item }) => {
-                        const selected = selectedStaff?.id === item.id;
-                        return (
-                          <Pressable
-                            onPress={() => setSelectedStaff(selected ? null : item)}
-                            style={[wiz.staffCard, selected && wiz.staffCardSel]}>
-                            <View style={[wiz.staffAv, selected && wiz.staffAvSel]}>
-                              <Text style={[wiz.staffAvLetter, selected && { color: '#FFF' }]}>
-                                {item.name.charAt(0)}
-                              </Text>
-                            </View>
-                            <View style={wiz.staffInfo}>
-                              <Text style={[wiz.staffName, selected && { color: colors.primaryBlue }]}>
-                                {item.name}
-                              </Text>
-                              <Text style={wiz.staffEmail}>{item.email}</Text>
-                              <Text style={wiz.staffMeta}>
-                                {item.assignedClasses} class{item.assignedClasses !== 1 ? 'es' : ''} assigned
-                              </Text>
-                            </View>
-                            <View style={[wiz.checkCircle, selected && wiz.checkCircleSel]}>
-                              {selected && <MaterialIcons name="check" size={14} color="#FFF" />}
-                            </View>
-                          </Pressable>
-                        );
-                      }}
-                    />
-                  )
-                }
-              </View>
+                  </View>
+                ) : (
+                  <>
+                    {staffList.length === 0
+                      ? (
+                        <View style={wiz.noStaff}>
+                          <MaterialIcons name="badge" size={48} color="#CBD5E1" />
+                          <Text style={wiz.noStaffT}>No staff created yet</Text>
+                          <Text style={wiz.noStaffD}>Select &quot;New Account&quot; to create your first staff credits.</Text>
+                        </View>
+                      )
+                      : staffList.map(item => {
+                          const selected = selectedStaff?.id === item.id;
+                          return (
+                            <Pressable
+                              key={item.id}
+                              onPress={() => setSelectedStaff(selected ? null : item)}
+                              style={[wiz.staffCard, selected && wiz.staffCardSel]}>
+                              <View style={[wiz.staffAv, selected && wiz.staffAvSel]}>
+                                <Text style={[wiz.staffAvLetter, selected && { color: '#FFF' }]}>
+                                  {item.name.charAt(0)}
+                                </Text>
+                              </View>
+                              <View style={wiz.staffInfo}>
+                                <Text style={[wiz.staffName, selected && { color: colors.primaryBlue }]}>
+                                  {item.name}
+                                </Text>
+                                <Text style={wiz.staffEmail}>{item.staffId || item.email}</Text>
+                                <Text style={wiz.staffMeta}>
+                                  {item.department} Department
+                                </Text>
+                              </View>
+                              <View style={[wiz.checkCircle, selected && wiz.checkCircleSel]}>
+                                {selected && <MaterialIcons name="check" size={14} color="#FFF" />}
+                              </View>
+                            </Pressable>
+                          );
+                      })
+                    }
+                  </>
+                )}
+              </ScrollView>
 
               <View style={wiz.footer}>
                 <Pressable style={wiz.backBtn} onPress={() => setStep(1)}>
@@ -626,7 +863,7 @@ export default function DeanManagement() {
                   {submitting
                     ? <ActivityIndicator color="#FFF" />
                     : <>
-                        <Text style={wiz.nextBtnTxt}>Assign & Continue</Text>
+                        <Text style={wiz.nextBtnTxt}>{staffMode === 'create' ? 'Create & Assign' : 'Assign & Continue'}</Text>
                         <MaterialIcons name="arrow-forward" size={20} color="#FFF" />
                       </>
                   }
@@ -688,6 +925,15 @@ export default function DeanManagement() {
                     }
                   </Pressable>
                 </View>
+
+                {/* CSV Bulk Import */}
+                <Pressable
+                  style={wiz.csvImportBtn}
+                  onPress={() => openCsvImport(createdClass?.id || '')}
+                >
+                  <MaterialIcons name="upload-file" size={20} color="#0F766E" />
+                  <Text style={wiz.csvImportTxt}>Bulk Import via CSV</Text>
+                </Pressable>
               </ScrollView>
 
               <View style={wiz.footer}>
@@ -771,6 +1017,354 @@ export default function DeanManagement() {
                 {editingStu ? 'Save Changes' : 'Add Student'}
               </Text>}
             </Pressable>
+            {!editingStu && (
+              <Pressable
+                style={[s.csvAltBtn, { marginTop: 10 }]}
+                onPress={() => { setStuModal(false); openCsvImport(stuClassId); }}
+              >
+                <MaterialIcons name="upload-file" size={16} color="#0F766E" />
+                <Text style={s.csvAltTxt}>Import multiple via CSV instead</Text>
+              </Pressable>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── CSV IMPORT MODAL ── */}
+      <Modal visible={csvModal} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.overlay}>
+          <Pressable style={s.overlayBg} onPress={() => setCsvModal(false)} />
+          <View style={[s.sheet, { maxHeight: '85%' }]}>
+            <View style={s.sheetHeader}>
+              <Text style={s.sheetTitle}>Bulk Import Students</Text>
+              <Pressable onPress={() => setCsvModal(false)}>
+                <MaterialIcons name="close" size={22} color="#64748B" />
+              </Pressable>
+            </View>
+
+            {/* Format info */}
+            <View style={s.csvInfoBox}>
+              <MaterialIcons name="info-outline" size={16} color={colors.primaryBlue} />
+              <Text style={s.csvInfoTxt}>
+                Format: <Text style={{ fontWeight: '700' }}>register_number,name</Text>{`\n`}One student per line. First row can be a header (will be skipped).
+              </Text>
+            </View>
+
+            <Text style={s.label}>Paste CSV Data</Text>
+            <TextInput
+              style={[s.input, { height: 130, textAlignVertical: 'top', paddingTop: 12 }]}
+              placeholder={`21CS001,Ravi Kumar\n21CS002,Priya Sharma\n21CS003,Arjun Singh`}
+              placeholderTextColor="#94A3B8"
+              value={csvText}
+              onChangeText={handleCsvChange}
+              multiline
+              autoCapitalize="none"
+            />
+
+            {/* Preview */}
+            {csvPreview.length > 0 && (
+              <View style={s.csvPreviewBox}>
+                <Text style={s.csvPreviewTitle}>Preview — {csvPreview.length} students</Text>
+                <ScrollView style={{ maxHeight: 140 }}>
+                  {csvPreview.slice(0, 8).map((r, i) => (
+                    <View key={i} style={s.csvPreviewRow}>
+                      <Text style={s.csvPreviewRoll}>{r.rollNo}</Text>
+                      <Text style={s.csvPreviewName}>{r.name}</Text>
+                    </View>
+                  ))}
+                  {csvPreview.length > 8 && (
+                    <Text style={{ color: '#94A3B8', fontSize: 12, textAlign: 'center', paddingVertical: 4 }}>
+                      +{csvPreview.length - 8} more...
+                    </Text>
+                  )}
+                </ScrollView>
+              </View>
+            )}
+
+            <Pressable
+              style={[s.submitBtn, (csvImporting || csvPreview.length === 0) && { opacity: 0.5 }]}
+              onPress={handleCsvImport}
+              disabled={csvImporting || csvPreview.length === 0}
+            >
+              {csvImporting
+                ? <ActivityIndicator color="#FFF" />
+                : <Text style={s.submitTxt}>Import {csvPreview.length > 0 ? `${csvPreview.length} Students` : 'Students'}</Text>
+              }
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── DETAIL SHEET (Classes / Students / Staff) ── */}
+      <Modal visible={detailSheet !== null} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.overlay}>
+          <Pressable style={s.overlayBg} onPress={() => setDetailSheet(null)} />
+          <View style={[s.sheet, { maxHeight: '78%', paddingBottom: 32 }]}>
+
+            {/* Header */}
+            <View style={s.sheetHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{
+                  width: 36, height: 36, borderRadius: 18,
+                  backgroundColor: detailSheet === 'classes' ? '#EEF2FF' : detailSheet === 'students' ? '#ECFDF5' : '#FFFBEB',
+                  justifyContent: 'center', alignItems: 'center',
+                }}>
+                  <MaterialIcons
+                    name={detailSheet === 'classes' ? 'class' : detailSheet === 'students' ? 'groups' : 'admin-panel-settings'}
+                    size={20}
+                    color={detailSheet === 'classes' ? '#6366F1' : detailSheet === 'students' ? '#059669' : '#D97706'}
+                  />
+                </View>
+                <Text style={s.sheetTitle}>
+                  {detailSheet === 'classes' ? `All Classes (${classes.length})`
+                    : detailSheet === 'students' ? `All Students (${Object.values(students).reduce((a, arr) => a + arr.length, 0)})`
+                    : `Staff Members (${staffList.length})`}
+                </Text>
+              </View>
+              <Pressable onPress={() => setDetailSheet(null)}>
+                <MaterialIcons name="close" size={22} color="#64748B" />
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+
+              {/* CLASSES */}
+              {detailSheet === 'classes' && (
+                classes.length === 0
+                  ? <View style={s.detailEmpty}>
+                      <MaterialIcons name="class" size={40} color="#E2E8F0" />
+                      <Text style={s.detailEmptyTxt}>No classes created yet</Text>
+                    </View>
+                  : classes.map((cls, i) => {
+                      const clsStu = students[cls.id] || [];
+                      const pal = ['#EEF2FF','#ECFDF5','#EFF6FF','#FFF7ED','#FFF1F2'];
+                      const palC = ['#6366F1','#059669','#3B82F6','#D97706','#E11D48'];
+                      return (
+                        <View key={cls.id} style={s.detailRow}>
+                          <View style={[s.detailIcon, { backgroundColor: pal[i % 5] }]}>
+                            <Text style={{ fontSize: 18, fontWeight: '900', color: palC[i % 5] }}>{cls.name[0]}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.detailTitle}>{cls.name}</Text>
+                            <Text style={s.detailSub}>Year {cls.year} · Sec {cls.section}</Text>
+                            <Text style={s.detailSub2}>Advisor: {cls.advisor || 'Unassigned'}</Text>
+                          </View>
+                          <View style={{ alignItems: 'flex-end', gap: 2 }}>
+                            <View style={s.detailBadge}>
+                              <MaterialIcons name="person" size={11} color="#6366F1" />
+                              <Text style={[s.detailBadgeTxt, { color: '#6366F1' }]}>{clsStu.length}</Text>
+                            </View>
+                            <Text style={{ fontSize: 10, color: '#94A3B8' }}>students</Text>
+                          </View>
+                        </View>
+                      );
+                    })
+              )}
+
+              {/* STUDENTS */}
+              {detailSheet === 'students' && (
+                Object.values(students).flat().length === 0
+                  ? <View style={s.detailEmpty}>
+                      <MaterialIcons name="groups" size={40} color="#E2E8F0" />
+                      <Text style={s.detailEmptyTxt}>No students enrolled yet</Text>
+                    </View>
+                  : classes.map(cls => {
+                      const clsStu = students[cls.id] || [];
+                      if (clsStu.length === 0) return null;
+                      return (
+                        <View key={cls.id}>
+                          <Text style={s.detailGroupHeader}>{cls.name} — {clsStu.length} students</Text>
+                          {clsStu.map(stu => (
+                            <View key={stu.id} style={s.detailRow}>
+                              <View style={[s.detailIcon, { backgroundColor: '#EFF6FF' }]}>
+                                <Text style={{ fontSize: 16, fontWeight: '800', color: '#3B82F6' }}>{stu.name[0]?.toUpperCase()}</Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.detailTitle}>{stu.name}</Text>
+                                <Text style={s.detailSub}>{stu.rollNo}</Text>
+                              </View>
+                              <View style={s.detailBadge}>
+                                <Text style={[s.detailBadgeTxt, { color: stu.attendanceRate >= 75 ? '#059669' : '#E11D48' }]}>
+                                  {stu.attendanceRate ?? 0}%
+                                </Text>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    })
+              )}
+
+              {/* STAFF */}
+              {detailSheet === 'staff' && (
+                staffList.length === 0
+                  ? <View style={s.detailEmpty}>
+                      <MaterialIcons name="admin-panel-settings" size={40} color="#E2E8F0" />
+                      <Text style={s.detailEmptyTxt}>No staff in this department yet</Text>
+                    </View>
+                  : staffList.map((sf) => {
+                      const assignedClasses = classes.filter(c => c.advisor === sf.name);
+                      const isExpanded = selectedStaffCred?.id === sf.id;
+                      return (
+                        <View key={sf.id}>
+                          {/* Staff row */}
+                          <Pressable
+                            style={({ pressed }) => [s.detailRow, pressed && { opacity: 0.7 }]}
+                            onPress={() => {
+                              setSelectedStaffCred(isExpanded ? null : sf);
+                              setCopiedField(null);
+                            }}
+                          >
+                            <View style={[s.detailIcon, { backgroundColor: '#FFFBEB' }]}>
+                              <Text style={{ fontSize: 18, fontWeight: '900', color: '#D97706' }}>{sf.name[0]?.toUpperCase()}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.detailTitle}>{sf.name}</Text>
+                              <Text style={s.detailSub}>{sf.staffId || sf.email || 'Auth account'}</Text>
+                              <Text style={s.detailSub2}>
+                                {assignedClasses.length > 0
+                                  ? `Assigned: ${assignedClasses.map(c => c.name).join(', ')}`
+                                  : 'No class assigned'}
+                              </Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                              <View style={[s.detailBadge, { backgroundColor: assignedClasses.length > 0 ? '#ECFDF5' : '#F1F5F9' }]}>
+                                <MaterialIcons name="class" size={11} color={assignedClasses.length > 0 ? '#059669' : '#94A3B8'} />
+                                <Text style={[s.detailBadgeTxt, { color: assignedClasses.length > 0 ? '#059669' : '#94A3B8' }]}>
+                                  {assignedClasses.length}
+                                </Text>
+                              </View>
+                              <MaterialIcons
+                                name={isExpanded ? 'expand-less' : 'vpn-key'}
+                                size={16}
+                                color={sf.staffId ? '#D97706' : '#CBD5E1'}
+                              />
+                            </View>
+                          </Pressable>
+
+                          {/* Inline credentials expand */}
+                          {isExpanded && (
+                            <View style={s.credInlineBox}>
+                              {sf.staffId ? (
+                                <>
+                                  <Text style={s.credInlineLabel}>STAFF ID</Text>
+                                  <Pressable
+                                    style={s.credCopyField}
+                                    onPress={() => copyToClipboard(sf.staffId!, 'id')}
+                                  >
+                                    <Text style={s.credCopyValue}>{sf.staffId}</Text>
+                                    <View style={[s.credCopyBtn, copiedField === 'id' && s.credCopyBtnDone]}>
+                                      <MaterialIcons
+                                        name={copiedField === 'id' ? 'check' : 'content-copy'}
+                                        size={15} color={copiedField === 'id' ? '#059669' : '#475569'}
+                                      />
+                                      <Text style={[s.credCopyBtnTxt, copiedField === 'id' && { color: '#059669' }]}>
+                                        {copiedField === 'id' ? 'Copied!' : 'Copy'}
+                                      </Text>
+                                    </View>
+                                  </Pressable>
+
+                                  {sf.password ? (
+                                    <>
+                                      <Text style={[s.credInlineLabel, { marginTop: 10 }]}>PASSWORD</Text>
+                                      <Pressable
+                                        style={s.credCopyField}
+                                        onPress={() => copyToClipboard(sf.password!, 'pass')}
+                                      >
+                                        <Text style={s.credCopyValue}>{sf.password}</Text>
+                                        <View style={[s.credCopyBtn, copiedField === 'pass' && s.credCopyBtnDone]}>
+                                          <MaterialIcons
+                                            name={copiedField === 'pass' ? 'check' : 'content-copy'}
+                                            size={15} color={copiedField === 'pass' ? '#059669' : '#475569'}
+                                          />
+                                          <Text style={[s.credCopyBtnTxt, copiedField === 'pass' && { color: '#059669' }]}>
+                                            {copiedField === 'pass' ? 'Copied!' : 'Copy'}
+                                          </Text>
+                                        </View>
+                                      </Pressable>
+                                    </>
+                                  ) : (
+                                    <Text style={s.credInlineNoPass}>Password not stored (legacy account)</Text>
+                                  )}
+                                </>
+                              ) : (
+                                <Text style={s.credInlineNoPass}>Email/password account — no managed credentials</Text>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })
+              )}
+
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── CREATE STAFF MODAL ── */}
+      <Modal visible={createStaffModal} transparent animationType="fade">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.overlay}>
+          <Pressable style={s.overlayBg} onPress={() => setCreateStaffModal(false)} />
+          <View style={s.sheet}>
+            <View style={s.sheetHeader}>
+              <Text style={s.sheetTitle}>Create Staff Account</Text>
+              <Pressable onPress={() => setCreateStaffModal(false)}>
+                <MaterialIcons name="close" size={22} color="#64748B" />
+              </Pressable>
+            </View>
+
+            <View style={s.csvInfoBox}>
+              <MaterialIcons name="vpn-key" size={16} color="#0F766E" />
+              <Text style={s.csvInfoTxt}>
+                Department: <Text style={{ fontWeight: '700' }}>{user?.department}</Text>. Staff will login using Staff ID + Password.
+              </Text>
+            </View>
+
+            <Text style={s.label}>Full Name</Text>
+            <TextInput
+              style={s.input}
+              placeholder="e.g. Dr. Sarah Connor"
+              value={csName}
+              onChangeText={handleCsNameChange}
+              placeholderTextColor="#94A3B8"
+            />
+
+            {/* Auto-generated credentials */}
+            {csId !== '' && (
+              <>
+                <View style={s.genRow}>
+                  <Text style={s.label}>Staff ID</Text>
+                  <Pressable onPress={() => generateCredentials(csName)} style={s.regenBtn}>
+                    <MaterialIcons name="refresh" size={14} color="#0F766E" />
+                    <Text style={s.regenTxt}>Regenerate</Text>
+                  </Pressable>
+                </View>
+                <View style={s.genField}>
+                  <MaterialIcons name="badge" size={18} color="#0F766E" />
+                  <Text style={s.genValue}>{csId}</Text>
+                </View>
+
+                <Text style={[s.label, { marginTop: 12 }]}>Password</Text>
+                <View style={s.genField}>
+                  <MaterialIcons name="vpn-key" size={18} color="#0F766E" />
+                  <Text style={s.genValue}>{csPass}</Text>
+                </View>
+
+                <View style={s.credHintBox}>
+                  <MaterialIcons name="info-outline" size={14} color="#92400E" />
+                  <Text style={s.credHintTxt}>Screenshot or note these credentials — share them with the staff member.</Text>
+                </View>
+              </>
+            )}
+
+            <Pressable
+              style={[s.submitBtn, { backgroundColor: '#0F766E', marginTop: 16 }, (csSubmitting || !csId) && { opacity: 0.5 }]}
+              onPress={handleCreateStaff}
+              disabled={csSubmitting || !csId}
+            >
+              {csSubmitting ? <ActivityIndicator color="#FFF" /> : <Text style={s.submitTxt}>Create Staff Account</Text>}
+            </Pressable>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -811,6 +1405,32 @@ const s = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12,
   },
   createBtnText: { color: '#FFF', fontWeight: '800', fontSize: 13 },
+  // Action buttons row (below title)
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    paddingTop: 4,
+  },
+  actionBtn2: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  actionBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+  },
+  actionBtnTxt: { color: '#FFF', fontWeight: '800', fontSize: 13 },
   statChipsScroll: { marginTop: spacing.xs },
   statChips: {
     flexDirection: 'row', gap: 10,
@@ -939,6 +1559,99 @@ const s = StyleSheet.create({
     borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginTop: 8,
   },
   submitTxt: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  // CSV styles
+  csvAltBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 10,
+  },
+  csvAltTxt: { fontSize: 13, color: '#0F766E', fontWeight: '600' },
+  csvInfoBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    backgroundColor: '#F0FDF4', borderRadius: 12, padding: 12,
+    marginBottom: spacing.md, borderWidth: 1, borderColor: '#BBF7D0',
+  },
+  csvInfoTxt: { flex: 1, fontSize: 12, color: '#166534', lineHeight: 17 },
+  csvPreviewBox: {
+    backgroundColor: '#F8FAFC', borderRadius: 12, padding: 12,
+    marginBottom: spacing.md, borderWidth: 1, borderColor: '#E2E8F0',
+  },
+  csvPreviewTitle: { fontSize: 11, fontWeight: '700', color: '#475569', marginBottom: 8, textTransform: 'uppercase' },
+  csvPreviewRow: { flexDirection: 'row', gap: 10, paddingVertical: 4, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
+  csvPreviewRoll: { fontSize: 12, fontWeight: '700', color: colors.primaryBlue, minWidth: 90 },
+  csvPreviewName: { fontSize: 12, color: '#0F172A', flex: 1 },
+  // Auto-generated credential styles
+  genRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  regenBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  regenTxt: { fontSize: 12, fontWeight: '700', color: '#0F766E' },
+  genField: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14,
+    borderWidth: 1.5, borderColor: '#BBF7D0', marginBottom: 4,
+  },
+  genValue: { fontSize: 16, fontWeight: '800', color: '#065F46', letterSpacing: 0.5, flex: 1 },
+  credHintBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: '#FFFBEB', borderRadius: 10, padding: 10,
+    borderWidth: 1, borderColor: '#FDE68A', marginTop: 10,
+  },
+  credHintTxt: { fontSize: 12, color: '#92400E', flex: 1, lineHeight: 17 },
+  // Detail sheet styles
+  detailRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
+  },
+  detailIcon: {
+    width: 42, height: 42, borderRadius: 21,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  detailTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  detailSub: { fontSize: 12, color: '#64748B', marginTop: 1 },
+  detailSub2: { fontSize: 11, color: '#94A3B8', marginTop: 1 },
+  detailBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8,
+  },
+  detailBadgeTxt: { fontSize: 12, fontWeight: '800' },
+  detailGroupHeader: {
+    fontSize: 11, fontWeight: '700', color: '#64748B',
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    paddingVertical: 10, paddingTop: 18,
+  },
+  detailEmpty: { alignItems: 'center', gap: 8, paddingVertical: 40 },
+  detailEmptyTxt: { fontSize: 14, color: '#94A3B8', fontWeight: '500' },
+  // Credential copy field
+  credCopyField: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#F0FDF4', borderRadius: 14,
+    borderWidth: 1.5, borderColor: '#BBF7D0',
+    paddingLeft: 16, paddingRight: 10, paddingVertical: 14,
+    gap: 10, marginBottom: 4,
+  },
+  credCopyValue: {
+    flex: 1, fontSize: 18, fontWeight: '800',
+    color: '#065F46', letterSpacing: 0.5,
+    fontVariant: ['tabular-nums'],
+  },
+  credCopyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#FFF', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderWidth: 1, borderColor: '#E2E8F0',
+  },
+  credCopyBtnDone: { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' },
+  credCopyBtnTxt: { fontSize: 12, fontWeight: '700', color: '#475569' },
+  // Inline credential expand block
+  credInlineBox: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 14, padding: 14,
+    marginBottom: 8, marginTop: 2,
+    borderWidth: 1.5, borderColor: '#BBF7D0',
+  },
+  credInlineLabel: {
+    fontSize: 10, fontWeight: '800', color: '#059669',
+    letterSpacing: 0.8, marginBottom: 6, textTransform: 'uppercase',
+  },
+  credInlineNoPass: { fontSize: 12, color: '#94A3B8', fontStyle: 'italic' },
 });
 
 // ── Wizard Styles ─────────────────────────────────────────
@@ -1029,6 +1742,17 @@ const wiz = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   checkCircleSel: { backgroundColor: colors.primaryBlue, borderColor: colors.primaryBlue },
+  // Mode switch
+  modeRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
+  modeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, height: 46, borderRadius: 12, backgroundColor: '#FFF',
+    borderWidth: 1.5, borderColor: '#E2E8F0',
+  },
+  modeBtnActive: { backgroundColor: colors.primaryBlue, borderColor: colors.primaryBlue },
+  modeBtnTxt: { fontSize: 13, fontWeight: '700', color: '#64748B' },
+  modeBtnTxtActive: { color: '#FFF' },
+  createForm: { gap: 4 },
   // Students step
   enrolledBox: {
     backgroundColor: '#FFF', borderRadius: 16,
@@ -1057,4 +1781,11 @@ const wiz = StyleSheet.create({
     height: 48, borderRadius: 12,
   },
   addStuTxtBtn: { fontSize: 14, fontWeight: 'bold', color: colors.primaryBlue },
+  csvImportBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 12, paddingVertical: 12,
+    borderRadius: 12, borderWidth: 1.5, borderColor: '#0F766E',
+    borderStyle: 'dashed',
+  },
+  csvImportTxt: { fontSize: 14, fontWeight: '700', color: '#0F766E' },
 });

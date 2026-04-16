@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  Dimensions, ActivityIndicator, Alert, Modal, TextInput, Image,
+  Dimensions, ActivityIndicator, Alert, Modal, TextInput, Image, Share, Clipboard,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,7 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { 
   School, Users, CheckCircle2, XCircle, 
-  RefreshCw, Calendar as CalendarIcon, ChevronRight,
+  RefreshCw, Calendar as CalendarIcon,
   TrendingUp, Activity
 } from 'lucide-react-native';
 import { useAuth } from '../../hooks/useAuth';
@@ -37,7 +37,7 @@ const PALETTE = [
   { bg: '#FDF2F8', ic: '#DB2777', Icon: CheckCircle2 },
 ];
 
-export default function DeanHome() {
+export default function HODHome() {
   const insets = useSafeAreaInsets();
   const { user, loading: authLoading } = useAuth();
   const [classes, setClasses] = useState<ClassData[]>([]);
@@ -46,9 +46,13 @@ export default function DeanHome() {
     totalClasses: 0, totalStudents: 0, totalStaff: 0,
   });
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
   const [holidays, setHolidays] = useState<{ date: string; note: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [markingHoliday, setMarkingHoliday] = useState<string | null>(null);
+  const [hodReport, setHodReport] = useState<string | null>(null);
+  const [hodReportLoading, setHodReportLoading] = useState(true);
+  const [hodExpanded, setHodExpanded] = useState(false);
   const [eventModal, setEventModal] = useState<{ visible: boolean; date: string; note: string; type: 'Leave' | 'Event' | 'Function' }>({
     visible: false,
     date: '',
@@ -56,14 +60,24 @@ export default function DeanHome() {
     type: 'Leave'
   });
 
-  const fetchAll = useCallback(async () => {
+  const toggleLogExpand = useCallback((id: string) => {
+    setExpandedLogs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
+      return newSet;
+    });
+  }, []);
+
+  const fetchAll = useCallback(async (silent = false) => {
     if (authLoading || !user) return;
     try {
-      setLoading(true);
+      // Show full spinner only on first ever load (no data yet)
+      if (!silent && classes.length === 0) setLoading(true);
       const [cls, st, logs, hols] = await Promise.all([
         dataService.getClasses(),
         dataService.getStatistics(),
-        dataService.getAttendanceLogs(5),
+        dataService.getDetailedActivityLogs(8),
         dataService.getHolidays(),
       ]);
       setClasses(cls);
@@ -71,20 +85,86 @@ export default function DeanHome() {
       setRecentLogs(logs);
       setHolidays(hols as any);
     } catch {
-      Alert.alert('Error', 'Failed to fetch dashboard data');
+      // Silently ignore errors on background refresh
     } finally {
       setLoading(false);
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, classes.length]);
+
+  // ── HOD Daily Report ──────────────────────────────────────────
+  const loadHodReport = useCallback(async () => {
+    if (!user) return;
+    try {
+      setHodReportLoading(true);
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const dd = String(today.getDate()).padStart(2, '0');
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const yy = String(today.getFullYear()).slice(2);
+      const dateFormatted = `${dd}.${mm}.${yy}`;
+
+      const cls = await dataService.getClasses();
+      if (cls.length === 0) { setHodReport(null); setHodReportLoading(false); return; }
+
+      // Fetch today's attendance for all classes
+      const classLines: string[] = [];
+      for (const c of cls) {
+        const [students, records] = await Promise.all([
+          dataService.getStudents(c.id),
+          dataService.getAttendance(c.id, todayStr),
+        ]);
+        if (records.length === 0) continue; // skip unsubmitted
+        const total = students.length;
+        let present = 0, approved = 0, unapproved = 0, od = 0;
+        records.forEach((r: any) => {
+          if (r.status === 'present') present++;
+          else if (r.status === 'absent') approved++;
+          else if (r.status === 'unapproved') unapproved++;
+          else if (r.status === 'on-duty') { present++; od++; }
+        });
+        const label = c.year ? `${c.year} ${c.name}` : c.name;
+        classLines.push(
+          `➕${label} ${present}/${total}\n` +
+          `📍Approved: ${String(approved).padStart(2, '0')}\n` +
+          `📍Unapproved: ${String(unapproved).padStart(2, '0')}\n` +
+          `📍OD: ${String(od).padStart(2, '0')}`
+        );
+      }
+
+      if (classLines.length === 0) { setHodReport(null); setHodReportLoading(false); return; }
+
+      const dept = (user.department || 'Dept').toUpperCase();
+      const hodName = user.name || 'HOD';
+      const report = [
+        `Department: ${dept}`,
+        `☀Date: ${dateFormatted}`,
+        '',
+        classLines.join('\n\n'),
+        '',
+        `Reported by:`,
+        `HOD /${dept} : ${hodName}`,
+      ].join('\n');
+      setHodReport(report);
+    } catch (e) {
+      console.error('loadHodReport error:', e);
+      setHodReport(null);
+    } finally {
+      setHodReportLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => { loadHodReport(); }, [loadHodReport]);
 
   useEffect(() => {
     if (authLoading || !user) return;
 
-    fetchAll();
-    const subClasses = dataService.subscribeToTable('classes', fetchAll);
-    const subAttendance = dataService.subscribeToTable('attendance_records', fetchAll);
-    const subStudents = dataService.subscribeToTable('students', fetchAll);
-    const subHolidays = dataService.subscribeToTable('holidays', fetchAll);
+    // First mount: full load
+    fetchAll(classes.length > 0);
+    // Realtime: silent background refresh
+    const subClasses     = dataService.subscribeToTable('classes',            () => fetchAll(true));
+    const subAttendance  = dataService.subscribeToTable('attendance_records', () => fetchAll(true));
+    const subStudents    = dataService.subscribeToTable('students',           () => fetchAll(true));
+    const subHolidays    = dataService.subscribeToTable('holidays',           () => fetchAll(true));
 
     return () => {
       subClasses?.unsubscribe();
@@ -92,7 +172,7 @@ export default function DeanHome() {
       subStudents?.unsubscribe();
       subHolidays?.unsubscribe();
     };
-  }, [fetchAll, authLoading, user]);
+  }, [fetchAll, authLoading, user, classes.length]);
 
   const handleDayPress = useCallback((date: string) => {
     const existing = holidays.find(h => h.date === date);
@@ -337,12 +417,96 @@ export default function DeanHome() {
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {/* ── HOD DAILY REPORT ── */}
+        <View style={d.reportWrap}>
+          <View style={d.reportSectionHeader}>
+            <Text style={styles.secTitle}>{"Today's Report"}</Text>
+            <Pressable onPress={loadHodReport}>
+              <RefreshCw size={16} color={colors.primaryBlue} />
+            </Pressable>
+          </View>
+
+          {hodReportLoading ? (
+            <View style={d.reportCard}>
+              <ActivityIndicator color="#4F46E5" />
+            </View>
+          ) : !hodReport ? (
+            <View style={d.reportCard}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={[d.reportIconBg, { backgroundColor: '#FEF3C7' }]}>
+                  <Text style={{ fontSize: 18 }}>📋</Text>
+                </View>
+                <View>
+                  <Text style={d.reportCardTitle}>HOD Report</Text>
+                  <Text style={d.reportCardSub}>No attendance submitted today</Text>
+                </View>
+              </View>
+              <View style={d.pendingBadge}>
+                <Text style={d.pendingTxt}>Waiting for advisors to submit attendance</Text>
+              </View>
+            </View>
+          ) : (
+            <View style={d.reportCard}>
+              {/* Header */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <LinearGradient colors={['#6366F1', '#8B5CF6']} style={d.reportIconBg}>
+                    <Text style={{ fontSize: 18 }}>📊</Text>
+                  </LinearGradient>
+                  <View>
+                    <Text style={d.reportCardTitle}>HOD Report</Text>
+                    <Text style={d.reportCardSub}>{new Date().toLocaleDateString('en-GB').replace(/\//g, '.')}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Preview */}
+              <Pressable onPress={() => setHodExpanded(e => !e)} style={d.previewWrap}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#64748B' }}>📋 Report Preview</Text>
+                  <MaterialIcons name={hodExpanded ? 'expand-less' : 'expand-more'} size={18} color="#94A3B8" />
+                </View>
+                <Text
+                  style={d.previewText}
+                  numberOfLines={hodExpanded ? undefined : 4}
+                  selectable
+                >
+                  {hodReport}
+                </Text>
+              </Pressable>
+
+              {/* Actions */}
+              <View style={d.actionRow}>
+                <Pressable
+                  style={d.shareBtn}
+                  onPress={() => Share.share({ message: hodReport! })}
+                >
+                  <LinearGradient colors={['#4F46E5','#7C3AED']} start={{x:0,y:0}} end={{x:1,y:0}} style={d.shareBtnGrad}>
+                    <MaterialIcons name="share" size={16} color="#FFF" />
+                    <Text style={d.shareBtnTxt}>Send Report</Text>
+                  </LinearGradient>
+                </Pressable>
+                <Pressable
+                  style={d.copyBtn}
+                  onPress={() => {
+                    Clipboard.setString(hodReport!);
+                    Alert.alert('Copied', 'Report copied to clipboard');
+                  }}
+                >
+                  <MaterialIcons name="content-copy" size={16} color="#4F46E5" />
+                  <Text style={d.copyBtnTxt}>Copy</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
+
         <Animated.View entering={FadeInDown.delay(700).duration(800)} style={styles.secRow}>
           <View>
             <Text style={styles.secTitle}>Departmental Overview</Text>
             <Text style={styles.secSubtitle}>Real-time performance metrics</Text>
           </View>
-          <Pressable onPress={fetchAll} style={styles.refreshBtn}>
+          <Pressable onPress={() => fetchAll(false)} style={styles.refreshBtn}>
             <RefreshCw size={18} color={colors.primaryBlue} />
           </Pressable>
         </Animated.View>
@@ -392,31 +556,174 @@ export default function DeanHome() {
             <Animated.View entering={FadeInDown.delay(1000).duration(800)} style={[styles.secRow, { marginTop: spacing.lg }]}>
               <View>
                 <Text style={styles.secTitle}>Recent Activity</Text>
-                <Text style={styles.secSubtitle}>Latest attendance submissions</Text>
+                <Text style={styles.secSubtitle}>Staff attendance submissions</Text>
               </View>
             </Animated.View>
+
             {recentLogs.map((log, i) => {
-              const good = (log.absent || 0) === 0;
+              const isExpanded = expandedLogs.has(log.id);
+              const dateLabel = (() => {
+                const d = new Date(log.date);
+                return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+              })();
+              const timeLabel = (() => {
+                if (!log.timestamp) return '';
+                const t = new Date(log.timestamp);
+                return t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+              })();
+
               return (
-                <Animated.View 
-                  key={log.id} 
-                  entering={FadeInDown.delay(1100 + (i * 100)).duration(800)}
-                  style={[styles.logCard, shadows.sm]}
+                <Animated.View
+                  key={log.id}
+                  entering={FadeInDown.delay(1100 + (i * 80)).duration(800)}
+                  style={[styles.activityCard, shadows.sm]}
                 >
-                  <View style={[styles.logIcon, { backgroundColor: good ? '#ECFDF5' : '#FFF1F2', overflow: 'hidden' }]}>
-                    {log.advisorImage ? (
-                      <Image source={{ uri: log.advisorImage }} style={{ width: '100%', height: '100%' }} />
-                    ) : (
-                      <MaterialIcons name={good ? 'check-circle' : 'info'} size={20} color={good ? '#10B981' : '#EF4444'} />
-                    )}
-                  </View>
-                  <View style={styles.logInfo}>
-                    <Text style={styles.logClass} numberOfLines={1}>{log.className}</Text>
-                    <Text style={styles.logMeta}>
-                      <Text style={{ fontWeight: '800' }}>{log.markedBy}</Text> • {log.present}P, {log.absent}A{log.onDuty > 0 ? `, ${log.onDuty}OD` : ''}
-                    </Text>
-                  </View>
-                  <ChevronRight size={16} color="#CBD5E1" />
+                  {/* Card Header — always visible */}
+                  <Pressable
+                    style={styles.activityHeader}
+                    onPress={() => toggleLogExpand(log.id)}
+                  >
+                    {/* Advisor Avatar */}
+                    <View style={styles.activityAvatar}>
+                      {log.advisorImage ? (
+                        <Image source={{ uri: log.advisorImage }} style={{ width: '100%', height: '100%', borderRadius: 24 }} />
+                      ) : (
+                        <LinearGradient colors={['#6366F1', '#8B5CF6']} style={{ width: '100%', height: '100%', borderRadius: 24, justifyContent: 'center', alignItems: 'center' }}>
+                          <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 16 }}>
+                            {log.advisor ? log.advisor.charAt(0).toUpperCase() : 'S'}
+                          </Text>
+                        </LinearGradient>
+                      )}
+                    </View>
+
+                    {/* Class Info */}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.activityClassName} numberOfLines={1}>{log.className}</Text>
+                      <Text style={styles.activityAdvisor} numberOfLines={1}>by {log.advisor}</Text>
+                      <Text style={styles.activityTime}>{dateLabel} · {timeLabel}</Text>
+                    </View>
+
+                    {/* Summary Chips */}
+                    <View style={styles.activityChips}>
+                      <View style={[styles.chip, { backgroundColor: '#ECFDF5' }]}>
+                        <Text style={[styles.chipTxt, { color: '#059669' }]}>{log.present}✓</Text>
+                      </View>
+                      {(log.absent + log.unapproved) > 0 && (
+                        <View style={[styles.chip, { backgroundColor: '#FFF1F2' }]}>
+                          <Text style={[styles.chipTxt, { color: '#EF4444' }]}>{log.absent + log.unapproved}✗</Text>
+                        </View>
+                      )}
+                      {log.onDuty > 0 && (
+                        <View style={[styles.chip, { backgroundColor: '#EFF6FF' }]}>
+                          <Text style={[styles.chipTxt, { color: '#3B82F6' }]}>{log.onDuty}OD</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <MaterialIcons
+                      name={isExpanded ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+                      size={20}
+                      color="#94A3B8"
+                    />
+                  </Pressable>
+
+                  {/* Expanded Details */}
+                  {isExpanded && (
+                    <View style={styles.activityDetails}>
+                      {/* Total summary bar */}
+                      <View style={styles.summaryBar}>
+                        <Text style={styles.summaryBarTxt}>
+                          {log.present + log.absent + log.onDuty + log.unapproved}/{log.totalStudents} Students Marked
+                        </Text>
+                        <View style={[styles.chip, { backgroundColor: '#F1F5F9' }]}>
+                          <Text style={[styles.chipTxt, { color: '#475569', fontWeight: '600' }]}>
+                            {log.totalStudents > 0 ? Math.round(((log.present + log.onDuty) / log.totalStudents) * 100) : 0}% Attendance
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Present — count only, no list */}
+                      {log.present > 0 && (
+                        <View style={styles.studentGroup}>
+                          <View style={styles.studentGroupHeader}>
+                            <View style={[styles.statusDot, { backgroundColor: '#10B981' }]} />
+                            <Text style={[styles.studentGroupTitle, { color: '#059669' }]}>Present ({log.present})</Text>
+                            <View style={[styles.statusBadge, { backgroundColor: '#ECFDF5', marginLeft: 'auto' }]}>
+                              <Text style={[styles.statusBadgeTxt, { color: '#059669' }]}>{log.present} students ✔</Text>
+                            </View>
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Absent — with Approved / Unapproved sub-groups */}
+                      {(log.absent + log.unapproved) > 0 && (
+                        <View style={styles.studentGroup}>
+                          {/* Parent header */}
+                          <View style={styles.studentGroupHeader}>
+                            <View style={[styles.statusDot, { backgroundColor: '#EF4444' }]} />
+                            <Text style={[styles.studentGroupTitle, { color: '#DC2626' }]}>
+                              Absent ({log.absent + log.unapproved})
+                            </Text>
+                          </View>
+
+                          {/* Approved Absent sub-group */}
+                          {log.absentStudents?.length > 0 && (
+                            <View style={{ marginLeft: 12, gap: 4, marginTop: 4 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 2, letterSpacing: 0.3 }}>
+                                — Approved ({log.absent})
+                              </Text>
+                              {log.absentStudents.map((s: any, si: number) => (
+                                <View key={si} style={styles.studentRow}>
+                                  <Text style={styles.studentRoll}>{s.rollNo}</Text>
+                                  <Text style={styles.studentName} numberOfLines={1}>{s.name}</Text>
+                                  <View style={[styles.statusBadge, { backgroundColor: '#FEF3C7' }]}>
+                                    <Text style={[styles.statusBadgeTxt, { color: '#92400E' }]}>Approved</Text>
+                                  </View>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+
+                          {/* Unapproved sub-group */}
+                          {log.unapprovedStudents?.length > 0 && (
+                            <View style={{ marginLeft: 12, gap: 4, marginTop: 4 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 2, letterSpacing: 0.3 }}>
+                                — Unapproved ({log.unapproved})
+                              </Text>
+                              {log.unapprovedStudents.map((s: any, si: number) => (
+                                <View key={si} style={styles.studentRow}>
+                                  <Text style={styles.studentRoll}>{s.rollNo}</Text>
+                                  <Text style={styles.studentName} numberOfLines={1}>{s.name}</Text>
+                                  <View style={[styles.statusBadge, { backgroundColor: '#FFF1F2' }]}>
+                                    <Text style={[styles.statusBadgeTxt, { color: '#EF4444' }]}>Unapp.</Text>
+                                  </View>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+                      )}
+
+                      {/* On-Duty Students */}
+                      {log.onDutyStudents?.length > 0 && (
+                        <View style={styles.studentGroup}>
+                          <View style={styles.studentGroupHeader}>
+                            <View style={[styles.statusDot, { backgroundColor: '#3B82F6' }]} />
+                            <Text style={[styles.studentGroupTitle, { color: '#2563EB' }]}>On-Duty ({log.onDuty})</Text>
+                          </View>
+                          {log.onDutyStudents.map((s: any, si: number) => (
+                            <View key={si} style={styles.studentRow}>
+                              <Text style={styles.studentRoll}>{s.rollNo}</Text>
+                              <Text style={styles.studentName} numberOfLines={1}>{s.name}</Text>
+                              <View style={[styles.statusBadge, { backgroundColor: '#EFF6FF' }]}>
+                                <Text style={[styles.statusBadgeTxt, { color: '#3B82F6' }]}>OD</Text>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </Animated.View>
               );
             })}
@@ -711,7 +1018,68 @@ const styles = StyleSheet.create({
   logInfo: { flex: 1 },
   logClass: { fontSize: 14, fontWeight: '800', color: '#1E293B' },
   logMeta: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '600' },
-  
+
+  // ── Activity Cards ─────────────────────────────────────────────
+  activityCard: {
+    backgroundColor: '#FFF', borderRadius: 24,
+    marginBottom: 14, overflow: 'hidden',
+    borderWidth: 1, borderColor: '#F1F5F9',
+  },
+  activityHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 14, gap: 12,
+  },
+  activityAvatar: {
+    width: 48, height: 48, borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 2, borderColor: '#E0E7FF',
+  },
+  activityClassName: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
+  activityAdvisor: { fontSize: 12, color: '#64748B', fontWeight: '600', marginTop: 1 },
+  activityTime: { fontSize: 10, color: '#94A3B8', fontWeight: '700', marginTop: 2, letterSpacing: 0.3 },
+  activityChips: { flexDirection: 'column', gap: 4, alignItems: 'flex-end' },
+  chip: {
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+  },
+  chipTxt: { fontSize: 11, fontWeight: '800' },
+  activityDetails: {
+    borderTopWidth: 1, borderTopColor: '#F1F5F9',
+    paddingHorizontal: 16, paddingVertical: 14,
+    backgroundColor: '#FAFBFF', gap: 14,
+  },
+  summaryBar: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F1F5F9', borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  summaryBarTxt: { fontSize: 12, fontWeight: '700', color: '#475569' },
+  studentGroup: { gap: 6 },
+  studentGroupHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginBottom: 4,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  studentGroupTitle: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  studentRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#FFF', borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 8,
+    borderWidth: 1, borderColor: '#F1F5F9',
+    gap: 10,
+  },
+  studentRoll: {
+    fontSize: 11, fontWeight: '800', color: '#64748B',
+    minWidth: 72, fontFamily: 'monospace',
+  },
+  studentName: { flex: 1, fontSize: 13, fontWeight: '600', color: '#1E293B' },
+  statusBadge: {
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 8,
+  },
+  statusBadgeTxt: { fontSize: 10, fontWeight: '800' },
+
   footerSpacer: { height: 80 },
 
   // Gauge Overlay
@@ -813,3 +1181,52 @@ const styles = StyleSheet.create({
     marginTop: 12 
   },
 });
+
+// ── HOD Report Card styles ──────────────────────────────────────
+const d = StyleSheet.create({
+  reportWrap: { marginBottom: 20 },
+  reportSectionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 12,
+  },
+  reportCard: {
+    backgroundColor: '#FFF', borderRadius: 24, padding: 18,
+    borderWidth: 1, borderColor: '#F1F5F9',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+  },
+  reportIconBg: {
+    width: 44, height: 44, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  reportCardTitle: { fontSize: 15, fontWeight: '800', color: '#1E293B' },
+  reportCardSub: { fontSize: 12, color: '#94A3B8', fontWeight: '600', marginTop: 1 },
+  pendingBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FEF3C7', borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 8, marginTop: 12,
+  },
+  pendingTxt: { fontSize: 12, color: '#D97706', fontWeight: '700', flex: 1 },
+  previewWrap: {
+    backgroundColor: '#F8FAFC', borderRadius: 16,
+    padding: 12, marginBottom: 14,
+    borderWidth: 1, borderColor: '#E2E8F0',
+  },
+  previewText: {
+    fontSize: 12, color: '#334155', lineHeight: 20, fontFamily: 'monospace',
+  },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  shareBtn: { flex: 3, borderRadius: 16, overflow: 'hidden' },
+  shareBtnGrad: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, paddingVertical: 14,
+  },
+  shareBtnTxt: { fontSize: 14, fontWeight: '800', color: '#FFF' },
+  copyBtn: {
+    flex: 1.4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, borderRadius: 16, borderWidth: 1.5, borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+  },
+  copyBtnTxt: { fontSize: 13, fontWeight: '800', color: '#4F46E5' },
+});
+

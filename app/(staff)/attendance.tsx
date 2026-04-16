@@ -24,52 +24,84 @@ function AttendanceDateStrip({
   holidays: string[];
   lockedDates: string[];
 }) {
+  const [pivotOffset, setPivotOffset] = useState(0); // Offset in multiples of 5 days
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+
   const dates = [];
-  const todayStr = new Date().toISOString().split('T')[0];
   for (let i = -2; i <= 2; i++) {
     const d = new Date();
-    d.setDate(d.getDate() + i);
+    d.setDate(d.getDate() + i + (pivotOffset * 5));
     dates.push(d.toISOString().split('T')[0]);
   }
 
-  return (
-    <View style={s.dateStrip}>
-      {dates.map((dateStr) => {
-        const d = new Date(dateStr);
-        const day = d.getDate();
-        const dayName = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-        const isSelected = dateStr === selectedDate;
-        const isFuture = dateStr > todayStr;
+  const shift = (dir: number) => {
+    setPivotOffset(prev => prev + dir);
+  };
 
-        return (
-          <Pressable
-            key={dateStr}
-            onPress={() => onSelect(dateStr)}
-            disabled={isFuture}
-            style={[
-              s.dateItem,
-              isSelected && s.dateItemSelected,
-              isFuture && { opacity: 0.3 }
-            ]}
-          >
-            <Text style={[s.dateDayName, isSelected && s.dateTextSelectedName]}>
-              {dayName}
-            </Text>
-            <Text style={[s.dateDay, isSelected && s.dateTextSelectedDay]}>
-              {day}
-            </Text>
-            {isSelected && <View style={s.selectedDot} />}
-            {holidays.some(h => (typeof h === 'string' ? h : (h as any).date) === dateStr) && (
-              <View style={s.holidayDot} />
-            )}
-            {lockedDates.includes(dateStr) && (
-              <View style={s.dateTickCorner}>
-                <Ionicons name="checkmark-circle" size={14} color="#10B981" />
-              </View>
-            )}
-          </Pressable>
-        );
-      })}
+  const resetToToday = () => {
+    setPivotOffset(0);
+    onSelect(todayStr);
+  };
+
+  return (
+    <View style={s.dateStripWrapper}>
+      {pivotOffset !== 0 && (
+        <Pressable onPress={resetToToday} style={s.todayJumpBtn}>
+          <Text style={s.todayJumpTxt}>GO TO TODAY</Text>
+        </Pressable>
+      )}
+      
+      <View style={s.dateStripContainer}>
+        <Pressable onPress={() => shift(-1)} style={s.dateNavBtn}>
+          <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.6)" />
+        </Pressable>
+
+        <View style={s.dateStrip}>
+          {dates.map((dateStr) => {
+            const d = new Date(dateStr);
+            const day = d.getDate();
+            const dayName = d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+            const isSelected = dateStr === selectedDate;
+            const isFuture = dateStr > todayStr;
+            const isToday = dateStr === todayStr;
+
+            return (
+              <Pressable
+                key={dateStr}
+                onPress={() => onSelect(dateStr)}
+                disabled={isFuture}
+                style={[
+                  s.dateItem,
+                  isSelected && s.dateItemSelected,
+                  isFuture && { opacity: 0.3 }
+                ]}
+              >
+                <Text style={[s.dateDayName, isSelected && s.dateTextSelectedName, isToday && !isSelected && { color: '#60A5FA' }]}>
+                  {dayName}
+                </Text>
+                <Text style={[s.dateDay, isSelected && s.dateTextSelectedDay, isToday && !isSelected && { color: '#FFF' }]}>
+                  {day}
+                </Text>
+                {isSelected && <View style={s.selectedDot} />}
+                {isToday && !isSelected && <View style={[s.selectedDot, { backgroundColor: '#60A5FA' }]} />}
+                {holidays.some(h => (typeof h === 'string' ? h : (h as any).date) === dateStr) && (
+                  <View style={s.holidayDot} />
+                )}
+                {lockedDates.includes(dateStr) && (
+                  <View style={s.dateTickCorner}>
+                    <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Pressable onPress={() => shift(1)} style={s.dateNavBtn}>
+          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.6)" />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -83,6 +115,8 @@ export default function StaffAttendance() {
   const [selectedClass, setSelectedClass] = useState<ClassData | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [attendance, setAttendance] = useState<Record<string, 'present'|'absent'|'on-duty'|'unapproved'>>({});
+  // Snapshot of what was last saved to DB (to compute live preview delta)
+  const [savedAttendance, setSavedAttendance] = useState<Record<string, 'present'|'absent'|'on-duty'|'unapproved'>>({});
   const [lockedDates, setLockedDates] = useState<string[]>([]);
   const [holidays, setHolidays] = useState<string[]>([]);
   
@@ -90,6 +124,24 @@ export default function StaffAttendance() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Compute a live preview attendance rate for a student based on current UI state.
+  const getPreviewRate = (student: Student): number => {
+    const savedStatus = savedAttendance[student.id] || 'present';
+    const currentStatus = attendance[student.id] || 'present';
+    
+    const wasAbsent = savedStatus === 'absent' || savedStatus === 'unapproved';
+    const isAbsent  = currentStatus === 'absent' || currentStatus === 'unapproved';
+
+    let rate = student.attendanceRate ?? 100;
+
+    // If we are changing from present to absent in the UI, show -3% preview.
+    // If we are changing from absent back to present, show +3% preview.
+    if (!wasAbsent && isAbsent)  rate -= 3;
+    if (wasAbsent  && !isAbsent) rate += 3;
+
+    return Math.max(0, Math.min(100, rate));
+  };
 
   // Load initial data
   const loadData = useCallback(async () => {
@@ -126,6 +178,7 @@ export default function StaffAttendance() {
         marked[r.studentId] = r.status;
       });
       setAttendance(marked);
+      setSavedAttendance(marked); // snapshot for live preview delta
 
       // If records exist, mark date as potentially locked
       if (records.length > 0) {
@@ -162,30 +215,39 @@ export default function StaffAttendance() {
   }, [selectedClass, loadClassAttendance, loadData]);
 
   const toggleAttendance = (studentId: string, status: 'present'|'absent'|'on-duty'|'unapproved') => {
-    if (lockedDates.includes(date) || isFutureDate) {
-      Alert.alert('Restricted', 'Attendance cannot be modified for this date.');
+    // PREVENT ALL EDITING if the attendance is already finalized (submitted)
+    if (lockedDates.includes(date)) {
+      Alert.alert('Attendance Finalized', 'This attendance has already been submitted and cannot be edited.');
       return;
     }
+
+    if (isFutureDate) {
+      Alert.alert('Restricted', 'Attendance cannot be marked for future dates.');
+      return;
+    }
+
     if (isHoliday) {
       Alert.alert('Holiday Mode', 'This day is marked as a holiday. All students are set to "Present" by default.');
       return;
     }
 
-    if (status === 'absent') {
-      Alert.alert(
-        'Absence Reason',
-        'Is this absence approved by the dean?',
-        [
-          { text: 'Unapproved', onPress: () => setAttendance(p => ({ ...p, [studentId]: 'unapproved' })) },
-          { text: 'Approved', onPress: () => setAttendance(p => ({ ...p, [studentId]: 'absent' })) },
-        ]
-      );
-    } else {
-      setAttendance(prev => ({
-        ...prev,
-        [studentId]: prev[studentId] === status ? 'present' : status
-      }));
-    }
+    setAttendance(prev => {
+      const current = prev[studentId] || 'present';
+      
+      // If student is already in the requested status, toggle back to present
+      if (current === status) {
+        return { ...prev, [studentId]: 'present' };
+      }
+
+      // If clicking the main 'A' button (status is 'absent' in the status grid call)
+      if (status === 'absent' && current === 'present') {
+        return { ...prev, [studentId]: 'unapproved' };
+      }
+
+      // Normal behavior: set to requested status (this covers sub-buttons and P/OD switches)
+      return { ...prev, [studentId]: status };
+    });
+
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   };
 
@@ -201,8 +263,16 @@ export default function StaffAttendance() {
         status: attendance[s.id] || 'present'
       }));
 
+      // markAttendance clears relevant caches. The SQL Trigger 'on_attendance_change'
+      // handles the actual rate recomputation in the background.
       await dataService.markAttendance(records);
+
+      // Lock the date and reload everything fresh from DB.
+      // loadClassAttendance fetches students (cache busted by recompute) so we
+      // get the correct updated attendance_rate without any manual delta math.
       setLockedDates(prev => [...prev, date]);
+      await loadClassAttendance();
+
       Alert.alert('Success', 'Attendance marked successfully!');
     } catch (e) {
       console.error('Save attendance button failed:', e);
@@ -211,6 +281,7 @@ export default function StaffAttendance() {
       setSaving(false);
     }
   };
+
 
   const filteredStudents = React.useMemo(() => {
     return students.filter(s => 
@@ -223,6 +294,7 @@ export default function StaffAttendance() {
   const activeHoliday = holidays.find(h => (typeof h === 'string' ? h : (h as any).date) === date) as any;
   const isHoliday = !!activeHoliday;
   const isFutureDate = date > todayStr;
+  const isLocked = lockedDates.includes(date);
 
   if (loading) {
     return (
@@ -245,7 +317,9 @@ export default function StaffAttendance() {
           </Pressable>
           <View style={s.titleBlock}>
             <Text style={s.title}>{selectedClass?.name || 'Loading...'}</Text>
-            <Text style={s.subtitle}>{selectedClass?.section?.toUpperCase() || 'SECTION'} • ATTENDANCE</Text>
+            <Text style={s.subtitle}>
+              {selectedClass?.section?.toUpperCase() || 'SECTION'} • {new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()}
+            </Text>
           </View>
           <View style={{ width: 40 }} />
         </View>
@@ -281,7 +355,16 @@ export default function StaffAttendance() {
           <View style={s.holidayBanner}>
             <Ionicons name="sunny" size={18} color="#15803D" />
             <Text style={s.holidayText}>
-              Holiday/Event: {activeHoliday.note ? activeHoliday.note.replace(/\[.*?\]\s*/, '') : 'Dean marked this day as leave'}
+              Holiday/Event: {activeHoliday.note ? activeHoliday.note.replace(/\[.*?\]\s*/, '') : 'HOD marked this day as leave'}
+            </Text>
+          </View>
+        )}
+
+        {isLocked && (
+          <View style={[s.holidayBanner, { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0' }]}>
+            <Ionicons name="lock-closed" size={18} color="#64748B" />
+            <Text style={[s.holidayText, { color: '#64748B' }]}>
+              Attendance Finalized: This record is locked for editing.
             </Text>
           </View>
         )}
@@ -299,17 +382,25 @@ export default function StaffAttendance() {
                     <Text style={s.studentName}>{student.name}</Text>
                     <Text style={s.rollNo}>ROLL: {student.rollNo}</Text>
                   </View>
+                  {/* Live attendance percentage — updates instantly on toggle */}
                   <View style={s.statsBlock}>
-                    <Text style={[s.percentageTxt, { color: student.attendanceRate >= 80 ? colors.success : student.attendanceRate >= 60 ? colors.warning : colors.error }]}>
-                      {Math.round(student.attendanceRate)}%
-                    </Text>
-                    <Text style={s.statsLabel}>TOTAL</Text>
+                    {(() => {
+                      const rate = getPreviewRate(student);
+                      const color = rate >= 80 ? colors.success : rate >= 60 ? colors.warning : colors.error;
+                      return (
+                        <>
+                          <Text style={[s.percentageTxt, { color }]}>{rate}%</Text>
+                          <Text style={s.statsLabel}>TOTAL</Text>
+                        </>
+                      );
+                    })()}
                   </View>
                 </View>
 
-                <View style={s.statusGrid}>
+                <View style={[s.statusGrid, (isLocked || isHoliday) && { opacity: 0.6 }]}>
                   <Pressable
                     onPress={() => toggleAttendance(student.id, 'present')}
+                    disabled={isLocked || isHoliday}
                     style={[s.statusTab, status === 'present' && s.tabPresent]}
                   >
                     <Text style={[s.tabTxt, status === 'present' && s.tabTxtActive]}>P</Text>
@@ -317,6 +408,7 @@ export default function StaffAttendance() {
                   
                   <Pressable
                     onPress={() => toggleAttendance(student.id, 'absent')}
+                    disabled={isLocked || isHoliday}
                     style={[s.statusTab, (status === 'absent' || status === 'unapproved') && s.tabAbsent]}
                   >
                     <Text style={[s.tabTxt, (status === 'absent' || status === 'unapproved') && s.tabTxtActive]}>A</Text>
@@ -324,6 +416,7 @@ export default function StaffAttendance() {
 
                   <Pressable
                     onPress={() => toggleAttendance(student.id, 'on-duty')}
+                    disabled={isLocked || isHoliday}
                     style={[s.statusTab, status === 'on-duty' && s.tabOD]}
                   >
                     <Text style={[s.tabTxt, status === 'on-duty' && s.tabTxtActive]}>OD</Text>
@@ -331,16 +424,18 @@ export default function StaffAttendance() {
                 </View>
 
                 {(status === 'absent' || status === 'unapproved') && (
-                  <View style={s.absentActions}>
+                  <View style={[s.absentActions, (isLocked || isHoliday) && { opacity: 0.6 }]}>
                     <Pressable 
                       style={[s.subBtn, { backgroundColor: status === 'absent' ? '#FEE2E2' : '#F1F5F9' }]}
                       onPress={() => toggleAttendance(student.id, 'absent')}
+                      disabled={isLocked || isHoliday}
                     >
                       <Text style={[s.subBtnTxt, { color: '#EF4444' }]}>APPR.</Text>
                     </Pressable>
                     <Pressable 
                       style={[s.subBtn, { backgroundColor: status === 'unapproved' ? '#7F1D1D' : '#F1F5F9' }]}
                       onPress={() => toggleAttendance(student.id, 'unapproved')}
+                      disabled={isLocked || isHoliday}
                     >
                       <Text style={[s.subBtnTxt, { color: status === 'unapproved' ? '#FFF' : '#7F1D1D' }]}>UNAPPR.</Text>
                     </Pressable>
@@ -352,9 +447,9 @@ export default function StaffAttendance() {
         </View>
       </ScrollView>
 
-      {/* Bottom Bar */}
+      {/* Bottom Bar placeholder for spacing */}
       {!lockedDates.includes(date) && !isFutureDate && (
-        <View style={[s.bottomBar, { paddingBottom: 30 }]}>
+        <View style={s.bottomBar}>
           <Pressable
             style={[s.saveBtn, saving && { opacity: 0.7 }, isHoliday && { backgroundColor: '#10B981' }]}
             onPress={saveAttendance}
@@ -403,9 +498,22 @@ const s = StyleSheet.create({
   moreBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'flex-end' },
 
   // Date Strip
+  dateStripWrapper: { width: '100%', alignItems: 'center' },
+  todayJumpBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 4,
+    borderRadius: 20, marginBottom: 8, alignSelf: 'center'
+  },
+  todayJumpTxt: { fontSize: 10, fontWeight: '800', color: '#FFF' },
+  dateStripContainer: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    width: '100%', paddingVertical: 10, gap: 5
+  },
+  dateNavBtn: {
+    width: 32, height: 48, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10,
+  },
   dateStrip: {
-    flexDirection: 'row', justifyContent: 'space-between', width: '100%',
-    paddingVertical: 10,
+    flex: 1, flexDirection: 'row', justifyContent: 'space-between',
   },
   dateItem: {
     width: 60, height: 75, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)',
@@ -490,18 +598,18 @@ const s = StyleSheet.create({
 
   // Bottom Bar
   bottomBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#FFF', padding: 20, borderTopWidth: 1, borderTopColor: '#F1F5F9',
+    position: 'absolute', bottom: 105, left: 20, right: 20,
+    backgroundColor: 'transparent',
   },
   saveBtn: {
-    backgroundColor: '#1D4ED8', height: 60, borderRadius: 18,
+    backgroundColor: '#1D4ED8', height: 60, borderRadius: 20,
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12,
-    ...shadows.md,
+    ...shadows.lg,
   },
   saveBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
 
   lockedBanner: {
-    position: 'absolute', bottom: 20, alignSelf: 'center',
+    position: 'absolute', bottom: 110, alignSelf: 'center',
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: '#F1F5F9', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20,
     borderWidth: 1, borderColor: '#E2E8F0',

@@ -19,7 +19,7 @@ import { supabase } from '../../lib/supabase';
 import { colors, spacing, shadows, gradients } from '../../constants/theme';
 import { useRouter } from 'expo-router';
 
-export default function DeanProfile() {
+export default function HODProfile() {
   const insets = useSafeAreaInsets();
   const { user, logout, refreshUser } = useAuth();
   const router = useRouter();
@@ -69,8 +69,8 @@ export default function DeanProfile() {
       if (!result.canceled && result.assets[0]) {
         setUploadingImage(true);
         const uri = result.assets[0].uri;
-        await authService.updateProfileImage(uri);
-        setImageUri(uri);
+        const uploadedUrl = await authService.updateProfileImage(uri);
+        setImageUri(uploadedUrl || uri);
         if (refreshUser) await refreshUser();
       }
     } catch (e: any) {
@@ -186,7 +186,7 @@ export default function DeanProfile() {
             { icon: User, label: 'Full Name', value: user?.name || '—' },
             { icon: Mail, label: 'Email Address', value: user?.email || '—' },
             { icon: School, label: 'Department', value: user?.department || '—' },
-            { icon: BadgeCheck, label: 'Role', value: 'Dean' },
+            { icon: BadgeCheck, label: 'Role', value: 'HOD' },
           ].map((row, i, arr) => (
             <View key={row.label} style={[styles.detailRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}>
               <View style={styles.detailIcon}>

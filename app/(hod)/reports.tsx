@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Dimensions, ActivityIndicator, Alert, Image,
 } from 'react-native';
-import { Download, Calendar, RefreshCcw, FileText, TrendingUp, Users, School, AlertCircle, BadgeCheck, Activity } from 'lucide-react-native';
+import { Download, Calendar, RefreshCcw, FileText, TrendingUp, Users, School, AlertCircle, BadgeCheck, Activity, User } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeInUp, FadeInRight, useAnimatedProps, useSharedValue, withTiming, withDelay, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -42,7 +42,7 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
 </style>
 </head>
 <body>
-  <h1>Dean Attendance Report</h1>
+  <h1>HOD Attendance Report</h1>
   <p class="sub">Period: ${period} &nbsp;·&nbsp; Generated ${format(new Date(), 'dd MMM yyyy, hh:mm a')}</p>
   <div class="summary">
     <div class="stat-box"><div class="stat-val">${stats.totalClasses}</div><div class="stat-lbl">Classes</div></div>
@@ -70,7 +70,7 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-export default function DeanReports() {
+export default function HODReports() {
   const insets = useSafeAreaInsets();
   const { user, loading: authLoading } = useAuth();
   const [period, setPeriod] = useState<Period>('Week');
@@ -87,8 +87,10 @@ export default function DeanReports() {
     if (authLoading || !user) return;
     try {
       setLoading(true);
+      // Always bust cache so reports reflect the latest Supabase data
+      dataService.clearCache();
       const [logs, st] = await Promise.all([
-        dataService.getAttendanceLogs(200),
+        dataService.getAttendanceLogs(500),
         dataService.getStatistics(),
       ]);
       setAllLogs(logs);
@@ -96,7 +98,8 @@ export default function DeanReports() {
       
       const today = format(new Date(), 'yyyy-MM-dd');
       setSelectedDay(today);
-    } catch {
+    } catch (e) {
+      console.error('Reports fetch error:', e);
     } finally {
       setLoading(false);
     }
@@ -129,6 +132,18 @@ export default function DeanReports() {
   }), [allLogs, period]);
 
   const focusLogs = useMemo(() => filteredLogs.filter(l => (l.date || '').substring(0, 10) === selectedDay), [filteredLogs, selectedDay]);
+
+  // Aggregate stats for the selected period (Today/Week/Month)
+  const periodTotals = useMemo(() => filteredLogs.reduce((s, l) => ({
+    p: s.p + (l.present || 0),
+    a: s.a + (l.absent || 0),
+    o: s.o + (l.onDuty || 0),
+    tot: s.tot + (l.totalStudents || (l.present + l.absent + (l.onDuty || 0))),
+    sess: s.sess + 1
+  }), { p: 0, a: 0, o: 0, tot: 0, sess: 0 }), [filteredLogs]);
+
+  const periodGrandRate = useMemo(() => periodTotals.tot > 0
+    ? Math.round(((periodTotals.p + periodTotals.o) / periodTotals.tot) * 100) : 0, [periodTotals]);
 
   const dayTotals = useMemo(() => focusLogs.reduce((s, l) => ({
     p: s.p + (l.present || 0),
@@ -181,12 +196,12 @@ export default function DeanReports() {
   // 3. Effects
   useEffect(() => {
     if (!loading) {
-      progress.value = withDelay(500, withTiming(dayGrandRate / 100, {
+      progress.value = withDelay(500, withTiming(periodGrandRate / 100, {
         duration: 1500,
         easing: Easing.out(Easing.exp)
       }));
     }
-  }, [loading, dayGrandRate, progress]);
+  }, [loading, periodGrandRate, progress]);
 
   const animatedProps = useAnimatedProps(() => {
     const circumference = 2 * Math.PI * 45;
@@ -360,7 +375,7 @@ export default function DeanReports() {
                   transform="rotate(-90 50 50)"
                 />
                 <SvgText x="50" y="48" fontSize="22" fontWeight="900" fill="#FFF" textAnchor="middle">
-                  {loading ? '—' : `${dayGrandRate}%`}
+                  {loading ? '—' : `${periodGrandRate}%`}
                 </SvgText>
                 <SvgText x="50" y="65" fontSize="8" fontWeight="600" fill="rgba(255,255,255,0.4)" textAnchor="middle">
                   ATTENDANCE
@@ -377,12 +392,12 @@ export default function DeanReports() {
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(400).duration(800)} style={styles.headerStatCard}>
                 <Users size={16} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.headerStatVal}>{dayTotals.p}</Text>
+                <Text style={styles.headerStatVal}>{periodTotals.p}</Text>
                 <Text style={styles.headerStatLbl}>Present</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(500).duration(800)} style={styles.headerStatCard}>
                 <AlertCircle size={16} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.headerStatVal}>{dayTotals.a}</Text>
+                <Text style={styles.headerStatVal}>{periodTotals.a}</Text>
                 <Text style={styles.headerStatLbl}>Absent</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(600).duration(800)} style={styles.headerStatCard}>
@@ -631,7 +646,7 @@ export default function DeanReports() {
             ? <View style={[styles.emptyCard, shadows.sm]}>
                 <FileText size={48} color="#CBD5E1" />
                 <Text style={styles.emptyTitle}>No records for this period</Text>
-                <Text style={styles.emptyDesc}>Switch to a different time filter.</Text>
+                <Text style={styles.emptyDesc}>Ask your HOD to assign classes to your account.</Text>
               </View>
             : classReports.map((cls, idx) => {
                 const pal = [
@@ -648,7 +663,7 @@ export default function DeanReports() {
                         {cls.advisorImage ? (
                           <Image source={{ uri: cls.advisorImage }} style={{ width: '100%', height: '100%' }} />
                         ) : (
-                          <School size={20} color={pal.color} />
+                          <User size={20} color={pal.color} />
                         )}
                       </View>
                       <View style={styles.clsInfo}>

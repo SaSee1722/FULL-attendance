@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
@@ -7,6 +7,8 @@ import { useAlert } from '@/template';
 import { colors, typography, spacing, borderRadius, shadows } from '../../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UserRole } from '../../services/authService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../../lib/supabase';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -15,13 +17,14 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [selectedRole, setSelectedRole] = useState<UserRole>('staff');
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const { showAlert } = useAlert();
   const insets = useSafeAreaInsets();
 
   const handleLogin = async () => {
     if (!email || !password) {
-      showAlert('Error', 'Please enter email and password');
+      const fieldName = selectedRole === 'staff' ? 'Staff ID/Email' : 'email';
+      showAlert('Error', `Please enter ${fieldName} and password`);
       return;
     }
 
@@ -29,13 +32,40 @@ export default function LoginScreen() {
     try {
       const loggedInUser = await login(email, password);
       
-      // Navigate based on role
-      switch (loggedInUser.role) {
+      // FIX: Check for "Mis-mapped Admin" (Staff with no department trying to login as Admin)
+      let finalUser = loggedInUser;
+      if (loggedInUser.role === 'staff' && selectedRole === 'admin' && !loggedInUser.department) {
+        // Automatically Promote to Admin permanently
+        const { error: updError } = await supabase
+          .from('profiles')
+          .update({ role: 'admin' })
+          .eq('id', loggedInUser.id);
+        
+        if (!updError) {
+          finalUser = { ...loggedInUser, role: 'admin' };
+          // Update local storage so splash screen etc work next time
+          await AsyncStorage.setItem('auth_user', JSON.stringify(finalUser));
+        }
+      }
+
+      // Role Mismatch Check
+      if (finalUser.role !== selectedRole) {
+        await logout();
+        showAlert(
+          'Incorrect Access', 
+          `This account is registered as a ${finalUser.role.toUpperCase()}. Please select the correct role above to continue.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Navigate based on FINAL role
+      switch (finalUser.role) {
         case 'admin':
           router.replace('/(admin)');
           break;
-        case 'dean':
-          router.replace('/(dean)');
+        case 'hod':
+          router.replace('/(hod)');
           break;
         case 'staff':
           router.replace('/(staff)');
@@ -43,9 +73,11 @@ export default function LoginScreen() {
         default:
           router.replace('/auth/login');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
-      showAlert('Login Failed', 'Invalid email or password. Please try again.');
+      const errorMessage = error?.message || 'Invalid email or password. Please try again.';
+      
+      showAlert('Login Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -53,7 +85,7 @@ export default function LoginScreen() {
 
   const roles: { value: UserRole; label: string; icon: keyof typeof MaterialIcons.glyphMap }[] = [
     { value: 'admin', label: 'Admin', icon: 'security' },
-    { value: 'dean', label: 'Dean', icon: 'account-balance' },
+    { value: 'hod', label: 'HOD', icon: 'account-balance' },
     { value: 'staff', label: 'Advisor', icon: 'groups' },
   ];
 
@@ -68,10 +100,14 @@ export default function LoginScreen() {
       >
         <View style={styles.header}>
           <View style={styles.iconBox}>
-            <MaterialIcons name="school" size={40} color={colors.primaryBlue} />
+            <Image 
+              source={require('../../assets/images/logo.png')} 
+              style={{ width: 60, height: 60 }} 
+              resizeMode="contain" 
+            />
           </View>
-          <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Select your role to access the attendance dashboard</Text>
+          <Text style={styles.title}>Welcome to AttendX</Text>
+          <Text style={styles.subtitle}>Institutional access for attendance management</Text>
         </View>
 
         <View style={styles.form}>
@@ -104,26 +140,28 @@ export default function LoginScreen() {
             })}
           </View>
 
-          <Text style={styles.inputLabel}>Institutional Email</Text>
+          <Text style={styles.inputLabel}>
+            {selectedRole === 'staff' ? 'Staff ID or Email' : 'Institutional Email'}
+          </Text>
           <View style={styles.inputWrapper}>
-            <Ionicons name="at-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
+            <Ionicons 
+              name={selectedRole === 'staff' ? "card-outline" : "at-outline"} 
+              size={20} 
+              color={colors.textTertiary} 
+              style={styles.inputIcon} 
+            />
             <TextInput
               style={styles.input}
-              placeholder="name@college.edu"
+              placeholder={selectedRole === 'staff' ? "ST-2024-001" : "name@college.edu"}
               placeholderTextColor={colors.textTertiary}
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
-              keyboardType="email-address"
+              keyboardType={selectedRole === 'staff' ? "default" : "email-address"}
             />
           </View>
 
-          <View style={styles.passwordHeader}>
-            <Text style={styles.inputLabel}>Password</Text>
-            <Pressable>
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </Pressable>
-          </View>
+          <Text style={styles.inputLabel}>Password</Text>
           <View style={styles.inputWrapper}>
             <MaterialIcons name="lock-outline" size={20} color={colors.textTertiary} style={styles.inputIcon} />
             <TextInput
@@ -159,12 +197,17 @@ export default function LoginScreen() {
             <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" style={styles.arrowIcon} />
           </Pressable>
 
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>New to the platform? </Text>
-            <Pressable onPress={() => router.push('/auth/signup')}>
-              <Text style={styles.footerLink}>Create an Account</Text>
-            </Pressable>
-          </View>
+          {selectedRole !== 'staff' && (
+            <View style={styles.footer}>
+              <Text style={styles.footerText}>New to the platform? </Text>
+              <Pressable onPress={() => router.push({
+                pathname: '/auth/signup',
+                params: { role: selectedRole }
+              })}>
+                <Text style={styles.footerLink}>Create an Account</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -260,6 +303,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     marginBottom: spacing.lg,
     paddingHorizontal: spacing.md,
+    minHeight: 56,
   },
   inputIcon: {
     marginRight: spacing.sm,
@@ -267,8 +311,10 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     ...typography.body,
-    paddingVertical: spacing.md,
+    paddingVertical: Platform.OS === 'ios' ? spacing.sm : 0,
     color: colors.textPrimary,
+    marginLeft: spacing.xs,
+    height: '100%',
   },
   passwordHeader: {
     flexDirection: 'row',

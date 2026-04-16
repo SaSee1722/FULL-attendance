@@ -1,7 +1,8 @@
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { useAuth } from '../../hooks/useAuth';
 
 const HomeIcon = ({ active, color }: { active: boolean; color: string }) => (
   <Svg width="24" height="24" viewBox="0 0 24 24" fill={active ? color : "none"} stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -86,6 +87,13 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 export default function StaffLayout() {
+  const { user, loading } = useAuth();
+
+  if (loading) return null;
+  if (!user || (user.role !== 'staff' && user.role !== 'admin')) {
+    return <Redirect href="/" />;
+  }
+
   return (
     <Tabs
       tabBar={(props) => <CustomTabBar {...props} />}

@@ -1,15 +1,16 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import Svg, { Circle, G, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import { useAuth } from '../../hooks/useAuth';
 import { dataService, ClassData } from '../../services/dataService';
 import { gradients } from '../../constants/theme';
+import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -26,6 +27,8 @@ interface DayTrend {
 type ClassSummary = Record<string, {
   present: number; absent: number; onDuty: number; total: number; rate: number;
 }>;
+
+type ReportMode = 'day' | 'week' | 'month';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: status label
@@ -89,45 +92,60 @@ const g = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 // Bar Chart – real 7-day data
 // ─────────────────────────────────────────────────────────────────────────────
-function BarChart({ data }: { data: DayTrend[] }) {
-  const BAR_H = 90;
+function BarChart({ data, mode }: { data: DayTrend[], mode: ReportMode }) {
+  const BAR_H = 100;
   const validRates = data.filter(d => d.rate >= 0).map(d => d.rate);
   const max = validRates.length > 0 ? Math.max(...validRates, 1) : 100;
 
+  // For month mode, bars represent weeks. For day mode, maybe we show session breakdown?
+  // But dataService gives us daily summary. So if mode === 'day', we'll just show 1 thinner bar.
+
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: BAR_H + 36, paddingHorizontal: 4 }}>
+    <View style={{ 
+      flexDirection: 'row', 
+      alignItems: 'flex-end', 
+      justifyContent: data.length === 1 ? 'center' : 'space-between', 
+      height: BAR_H + 40, 
+      paddingHorizontal: 10 
+    }}>
       {data.map((d, i) => {
         const hasData = d.rate >= 0;
-        const h = hasData ? Math.max((d.rate / max) * BAR_H, 6) : 0;
+        const h = hasData ? Math.max((d.rate / 100) * BAR_H, 6) : 0;
         const barColor = hasData ? getAttColor(d.rate) : '#E2E8F0';
         const barColor2 = hasData ? `${barColor}66` : '#F1F5F9';
         const isToday = d.date === new Date().toISOString().split('T')[0];
 
+        // Specific width for single bar to avoid "fat bar"
+        const barWidth = data.length === 1 ? 60 : data.length < 5 ? 45 : '70%';
+
         return (
-          <View key={d.date} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+          <View key={`${d.date}-${i}`} style={{ flex: data.length === 1 ? 0 : 1, width: data.length === 1 ? 80 : undefined, alignItems: 'center', gap: 6 }}>
             {/* value label */}
-            <Text style={{ fontSize: 10, fontWeight: '800', color: hasData ? barColor : '#CBD5E1' }}>
+            <Text style={{ fontSize: 11, fontWeight: '900', color: hasData ? barColor : '#CBD5E1' }}>
               {hasData ? `${d.rate}%` : '—'}
             </Text>
 
             {/* bar container */}
-            <View style={{ width: '65%', height: BAR_H, justifyContent: 'flex-end' }}>
+            <View style={{ width: barWidth as any, height: BAR_H, justifyContent: 'flex-end' }}>
               {hasData ? (
                 <LinearGradient
                   colors={[barColor, barColor2]}
                   start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
-                  style={{ height: h, borderRadius: 6, borderTopLeftRadius: 8, borderTopRightRadius: 8 }}
+                  style={{ height: h, borderRadius: 10, borderBottomLeftRadius: 4, borderBottomRightRadius: 4 }}
                 />
               ) : (
                 <View style={{ height: 4, backgroundColor: '#F1F5F9', borderRadius: 4 }} />
               )}
             </View>
 
-            {/* day label */}
-            <Text style={[bc.dayLabel, isToday && bc.dayLabelToday]}>
+            {/* label */}
+            <Text 
+              numberOfLines={1}
+              style={[bc.dayLabel, isToday && bc.dayLabelToday, mode === 'month' && { fontSize: 8 }]}
+            >
               {d.dayLabel}
             </Text>
-            {isToday && <View style={bc.todayDot} />}
+            {isToday && mode !== 'month' && <View style={bc.todayDot} />}
           </View>
         );
       })}
@@ -135,9 +153,9 @@ function BarChart({ data }: { data: DayTrend[] }) {
   );
 }
 const bc = StyleSheet.create({
-  dayLabel: { fontSize: 9, color: '#94A3B8', fontWeight: '700' },
+  dayLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '700', marginTop: 2 },
   dayLabelToday: { color: '#4F46E5', fontWeight: '900' },
-  todayDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#4F46E5', marginTop: -2 },
+  todayDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#4F46E5', marginTop: -2 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,6 +185,10 @@ const sc = StyleSheet.create({
   lbl: { fontSize: 10, color: '#64748B', fontWeight: '700' },
 });
 
+function toDateStr(d: Date) { return d.toISOString().split('T')[0]; }
+
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,52 +198,79 @@ export default function StaffReports() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [reportMode, setReportMode] = useState<ReportMode>('week');
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [trend, setTrend] = useState<DayTrend[]>([]);
   const [classSummary, setClassSummary] = useState<ClassSummary>({});
-  const [logs, setLogs] = useState<any[]>([]);
   const [stats, setStats] = useState({ totalClasses: 0, totalStudents: 0, needAttention: 0 });
+  const [absenteeDetails, setAbsenteeDetails] = useState<{
+    studentName: string; rollNo: string; status: string; date: string; className: string;
+  }[]>([]);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'absent' | 'unapproved' | 'on-duty'>('all');
+
+  // Date range state
+  const [startDate, setStartDate] = useState(() => toDateStr(subDays(new Date(), 6)));
+  const [endDate, setEndDate] = useState(() => toDateStr(new Date()));
 
   const subsRef = useRef<{ unsubscribe: () => void }[]>([]);
+
+  // Auto-update range when mode changes
+  React.useEffect(() => {
+    if (reportMode === 'day') {
+      const today = toDateStr(new Date());
+      setStartDate(today); setEndDate(today);
+    } else if (reportMode === 'week') {
+      setStartDate(toDateStr(subDays(new Date(), 6)));
+      setEndDate(toDateStr(new Date()));
+    } else if (reportMode === 'month') {
+      setStartDate(toDateStr(startOfMonth(new Date())));
+      setEndDate(toDateStr(endOfMonth(new Date())));
+    }
+  }, [reportMode]);
 
   const loadAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
 
     try {
-      // Parallel fetch: classes, weekly trend, logs
-      const [cls, trendData, logData] = await Promise.all([
+      // Use dates directly from state. 
+      // The reportMode logic is handled by the useEffect or CalendarPicker.
+      let s = startDate;
+      let e = endDate;
+
+      // If for some reason we land here without dates (shouldn't happen), use defaults
+      if (!s) s = toDateStr(new Date());
+      if (!e) e = s;
+
+      const [cls, trendData, details] = await Promise.all([
         dataService.getClasses(),
-        dataService.getWeeklyAttendanceTrend(7),
-        dataService.getAttendanceLogs(10),
+        dataService.getAttendanceTrend(s, e),
+        dataService.getAttendanceDetailsByRange(s, e),
       ]);
 
       setClasses(cls);
       setTrend(trendData);
-      setLogs(logData);
+      setAbsenteeDetails(details);
 
-      // Fetch per-class real attendance summary
+      // Fetch per-class real attendance summary based on selected range
       if (cls.length > 0) {
-        // from 14 days ago (optimized for speed)
-        const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - 14);
         const summary = await dataService.getClassAttendanceSummary(
           cls.map(c => c.id),
-          fromDate.toISOString().split('T')[0]
+          s,
+          e
         );
         setClassSummary(summary);
 
-        // Compute stats from real summary
+        // Compute stats from real summary (using average start date is okay for accuracy)
         const needsAttn = cls.filter(c => {
-          const s = summary[c.id];
-          // If we have real attendance data, use it; else fall back to attendanceRate from DB
-          const rate = s && s.total > 0 ? s.rate : c.attendanceRate;
+          const sc = summary[c.id];
+          const rate = sc && sc.total > 0 ? sc.rate : c.attendanceRate;
           return rate < 80;
         }).length;
 
         setStats({
           totalClasses: cls.length,
-          totalStudents: cls.reduce((a, c) => a + (c.studentCount || 0), 0),
+          totalStudents: cls.reduce((acc, c) => acc + (c.studentCount || 0), 0),
           needAttention: needsAttn,
         });
       } else {
@@ -234,7 +283,7 @@ export default function StaffReports() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [startDate, endDate, reportMode]);
 
   useFocusEffect(useCallback(() => {
     loadAll();
@@ -252,6 +301,41 @@ export default function StaffReports() {
     ? Math.round(sessionDays.reduce((a, d) => a + d.rate, 0) / sessionDays.length)
     : 0;
 
+  // Monthly Aggregated Trend: Aggregate into weeks if range is long (> 7 days)
+  const displayTrend = useMemo(() => {
+    const dayCount = trend.length;
+    const shouldAggregate = reportMode === 'month';
+
+    if (shouldAggregate && dayCount >= 14) {
+      const weeks: DayTrend[] = [];
+      // If it's roughly a month (28-31 days), use 4 weeks. 
+      // Otherwise, use 7-day chunks.
+      const chunk = dayCount <= 31 ? Math.floor(dayCount / 4) : 7;
+      const numChunks = dayCount <= 31 ? 4 : Math.ceil(dayCount / 7);
+      
+      for (let i = 0; i < numChunks; i++) {
+        const weekDays = trend.slice(i * chunk, (i + 1) * chunk);
+        if (weekDays.length === 0) continue;
+
+        const valid = weekDays.filter(d => d.rate >= 0);
+        const avg = valid.length > 0
+          ? Math.round(valid.reduce((acc, d) => acc + d.rate, 0) / valid.length)
+          : -1;
+        
+        weeks.push({
+          date: weekDays[0].date,
+          dayLabel: numChunks <= 5 ? `WK ${i + 1}` : `W${i + 1}`,
+          rate: avg,
+          present: weekDays.reduce((acc, d) => acc + d.present, 0),
+          absent: weekDays.reduce((acc, d) => acc + d.absent, 0),
+          total: weekDays.reduce((acc, d) => acc + d.total, 0),
+        });
+      }
+      return weeks;
+    }
+    return trend;
+  }, [trend, reportMode]);
+
   // Get real rate for a class (prefer live summary, fall back to DB rate)
   const getRealRate = (cls: ClassData): number => {
     const s = classSummary[cls.id];
@@ -261,9 +345,13 @@ export default function StaffReports() {
 
   const sortedClasses = [...classes].sort((a, b) => getRealRate(b) - getRealRate(a));
 
-  const dateRange = trend.length > 0
-    ? `${new Date(trend[0].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(trend[trend.length - 1].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-    : '—';
+  const dateRangeLabel = useMemo(() => {
+    if (reportMode === 'day') return format(new Date(startDate + 'T00:00:00'), 'MMM dd, yyyy');
+    if (reportMode === 'week') return 'Last 7 Days';
+    if (reportMode === 'month') return format(new Date(startDate + 'T00:00:00'), 'MMMM yyyy');
+    
+    return '—';
+  }, [reportMode, startDate]);
 
   const totalPresent7d = trend.reduce((a, d) => a + d.present, 0);
   const totalAbsent7d = trend.reduce((a, d) => a + d.absent, 0);
@@ -308,10 +396,25 @@ export default function StaffReports() {
             </Pressable>
           </View>
 
-          {/* Date pill */}
+          {/* Range Mode Selector */}
+          <View style={r.modeRow}>
+            {(['day', 'week', 'month'] as ReportMode[]).map(m => (
+              <Pressable
+                key={m}
+                onPress={() => setReportMode(m)}
+                style={[r.modeTab, reportMode === m && r.modeTabActive]}
+              >
+                <Text style={[r.modeTabTxt, reportMode === m && r.modeTabTxtActive]}>
+                  {m.toUpperCase()}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Date label pill */}
           <View style={r.datePill}>
             <MaterialIcons name="event-note" size={13} color="#FFF" />
-            <Text style={r.datePillTxt}>Weekly Outlook · {dateRange}</Text>
+            <Text style={r.datePillTxt}>{dateRangeLabel}</Text>
           </View>
 
           {/* Gauge - Reduced size for better visibility */}
@@ -349,7 +452,10 @@ export default function StaffReports() {
             <View>
               <Text style={r.cardTitle}>Activity Trend</Text>
               <Text style={r.cardSub}>
-                {sessionsHeld === 0 ? 'No sessions recorded this week' : 'Daily engagement over 7 days'}
+                {reportMode === 'day' ? 'Performance for selected day' : 
+                 reportMode === 'week' ? 'Daily metrics for the last 7 days' :
+                 reportMode === 'month' ? 'Weekly averages for this month' :
+                 'Attendance trends for custom range'}
               </Text>
             </View>
             <View style={r.iconBtn}>
@@ -357,10 +463,10 @@ export default function StaffReports() {
             </View>
           </View>
 
-          {trend.length > 0 ? (
-            <BarChart data={trend} />
+          {displayTrend.length > 0 ? (
+            <BarChart data={displayTrend} mode={reportMode} />
           ) : (
-            <EmptyState message="No attendance data for the last 7 days." />
+            <EmptyState message="No attendance data for this period." />
           )}
         </View>
 
@@ -405,37 +511,127 @@ export default function StaffReports() {
           )}
         </View>
 
-        {/* ── RECENT SESSIONS ── */}
+        {/* ── ABSENTEES & OD DETAILS ── */}
         <View style={r.card}>
           <View style={r.cardHeader}>
-            <Text style={r.cardTitle}>Recent Logs</Text>
-            <MaterialIcons name="history" size={16} color="#4F46E5" />
+            <View>
+              <Text style={r.cardTitle}>Absentees & OD</Text>
+              <Text style={r.cardSub}>Student-wise breakdown for selected range</Text>
+            </View>
+            <View style={[r.iconBtn, { backgroundColor: '#FEE2E2' }]}>
+              <MaterialIcons name="person-off" size={16} color="#DC2626" />
+            </View>
           </View>
 
-          {logs.length === 0 ? (
-            <EmptyState message="No recent sessions available." />
-          ) : (
-            logs.slice(0, 5).map((log, i) => {
-              const rate = log.total > 0 ? Math.round(((log.present + (log.onDuty || 0)) / log.total) * 100) : 0;
-              const rateColor = getAttColor(rate);
-              const formattedDate = new Date(log.date + 'T00:00:00').toLocaleDateString('en-US', {
-                month: 'short', day: 'numeric',
-              });
+          {/* Filter tabs */}
+          <View style={r.filterRow}>
+            {(['all', 'unapproved', 'absent', 'on-duty'] as const).map(f => (
+              <Pressable
+                key={f}
+                onPress={() => setActiveFilter(f)}
+                style={[r.filterTab, activeFilter === f && r.filterTabActive]}
+              >
+                <Text style={[r.filterTabTxt, activeFilter === f && r.filterTabTxtActive]}>
+                  {f === 'all' ? 'All' : f === 'unapproved' ? 'Unapproved' : f === 'absent' ? 'Approved' : 'OD'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {(() => {
+            const filtered = activeFilter === 'all'
+              ? absenteeDetails
+              : absenteeDetails.filter(d => d.status === activeFilter);
+
+            if (filtered.length === 0) {
               return (
-                <View key={log.id || i} style={[r.logRow, i > 0 && r.borderTop]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={r.logName}>{log.className}</Text>
-                    <Text style={r.logDate}>{formattedDate}</Text>
-                  </View>
-                  <View style={r.logStats}>
-                    <View style={[r.logStatusPill, { backgroundColor: `${rateColor}15` }]}>
-                      <Text style={[r.logStatusTxt, { color: rateColor }]}>{rate}%</Text>
-                    </View>
-                  </View>
+                <View style={e.wrap}>
+                  <Ionicons name="checkmark-circle" size={28} color="#34D399" />
+                  <Text style={[e.txt, { color: '#059669', fontWeight: '700' }]}>
+                    {activeFilter === 'all' ? 'No absences or OD in this period 🎉' : `No ${activeFilter === 'absent' ? 'approved absences' : activeFilter === 'unapproved' ? 'unapproved absences' : 'OD entries'} found`}
+                  </Text>
                 </View>
               );
-            })
-          )}
+            }
+
+            // Group by date
+            const grouped: Record<string, typeof filtered> = {};
+            filtered.forEach(d => {
+              if (!grouped[d.date]) grouped[d.date] = [];
+              grouped[d.date].push(d);
+            });
+            const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
+
+            return sortedDates.map(dateKey => {
+              const dayEntries = grouped[dateKey];
+              const dateLabel = new Date(dateKey + 'T00:00:00').toLocaleDateString('en-IN', {
+                weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
+              }).toUpperCase();
+
+              // Count by status for this day
+              const dayUnapproved = dayEntries.filter(x => x.status === 'unapproved').length;
+              const dayApproved   = dayEntries.filter(x => x.status === 'absent').length;
+              const dayOD         = dayEntries.filter(x => x.status === 'on-duty').length;
+
+              return (
+                <View key={dateKey} style={r.dayGroup}>
+                  {/* Date header bar */}
+                  <View style={r.dayHeader}>
+                    <View style={r.dayHeaderLeft}>
+                      <Ionicons name="calendar" size={12} color="#4F46E5" />
+                      <Text style={r.dayDate}>{dateLabel}</Text>
+                    </View>
+                    <View style={r.dayCountRow}>
+                      {dayUnapproved > 0 && (
+                        <View style={[r.dayCount, { backgroundColor: '#FEF2F2' }]}>
+                          <Text style={[r.dayCountTxt, { color: '#DC2626' }]}>{dayUnapproved}U</Text>
+                        </View>
+                      )}
+                      {dayApproved > 0 && (
+                        <View style={[r.dayCount, { backgroundColor: '#FEF9C3' }]}>
+                          <Text style={[r.dayCountTxt, { color: '#92400E' }]}>{dayApproved}A</Text>
+                        </View>
+                      )}
+                      {dayOD > 0 && (
+                        <View style={[r.dayCount, { backgroundColor: '#EEF2FF' }]}>
+                          <Text style={[r.dayCountTxt, { color: '#4F46E5' }]}>{dayOD}OD</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Student rows */}
+                  {dayEntries.map((entry, idx) => {
+                    const isUnappr = entry.status === 'unapproved';
+                    const isOD     = entry.status === 'on-duty';
+                    const statusColor = isUnappr ? '#DC2626' : isOD ? '#4F46E5' : '#D97706';
+                    const statusBg    = isUnappr ? '#FEF2F2' : isOD ? '#EEF2FF' : '#FFFBEB';
+                    const statusLabel = isUnappr ? 'Unapproved' : isOD ? 'OD' : 'Approved';
+                    const statusIcon  = isUnappr ? 'close-circle' : isOD ? 'briefcase' : 'checkmark-circle';
+
+                    return (
+                      <View
+                        key={`${dateKey}-${idx}`}
+                        style={[r.studentRow, idx < dayEntries.length - 1 && r.studentRowBorder]}
+                      >
+                        {/* Name + roll */}
+                        <View style={{ flex: 1 }}>
+                          <Text style={r.studentName}>{entry.studentName}</Text>
+                          <Text style={r.studentRoll}>Roll: {entry.rollNo}</Text>
+                        </View>
+
+                        {/* Status badge */}
+                        <View style={[r.statusBadge, { backgroundColor: statusBg }]}>
+                          <Ionicons name={statusIcon as any} size={12} color={statusColor} />
+                          <Text style={[r.statusBadgeTxt, { color: statusColor }]}>{statusLabel}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+            });
+          })()}
         </View>
 
       </ScrollView>
@@ -474,11 +670,19 @@ const r = StyleSheet.create({
   heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
   heroLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: '800', letterSpacing: 1.5, marginBottom: 4 },
   heroTitle: { fontSize: 26, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 },
-  heroSub: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2, fontWeight: '600' },
+  heroSub: { fontSize: 13, color: 'rgba(255,255,255,0.7)', fontWeight: '600', marginTop: 2 },
+  modeRow: { flexDirection: 'row', gap: 8, marginTop: 16, marginBottom: 8 },
+  modeTab: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+  },
+  modeTabActive: { backgroundColor: '#FFF', borderColor: '#FFF' },
+  modeTabTxt: { fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.6)', letterSpacing: 0.5 },
+  modeTabTxtActive: { color: '#4F46E5' },
   refreshBtn: {
     width: 38, height: 38, borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center', alignItems: 'center',
+    justifyContent: 'center', alignItems: 'center'
   },
   datePill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -538,5 +742,46 @@ const r = StyleSheet.create({
   logStats: { flexDirection: 'row', alignItems: 'center' },
   logStatusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
   logStatusTxt: { fontSize: 12, fontWeight: '800' },
+
+
+
+  // ── Absentees panel ──
+  filterRow: { flexDirection: 'row', gap: 6, marginBottom: 14, flexWrap: 'wrap' },
+  filterTab: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+    backgroundColor: '#F1F5F9', borderWidth: 1.5, borderColor: '#E2E8F0',
+  },
+  filterTabActive: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
+  filterTabTxt: { fontSize: 11, fontWeight: '800', color: '#64748B' },
+  filterTabTxtActive: { color: '#FFF' },
+
+  dayGroup: {
+    marginBottom: 12, borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1, borderColor: '#F1F5F9',
+  },
+  dayHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#F8FAFC', paddingHorizontal: 12, paddingVertical: 8,
+  },
+  dayHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dayDate: { fontSize: 10, fontWeight: '900', color: '#4F46E5', letterSpacing: 0.5 },
+  dayCountRow: { flexDirection: 'row', gap: 4 },
+  dayCount: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8 },
+  dayCountTxt: { fontSize: 10, fontWeight: '900' },
+
+  studentRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 12, paddingVertical: 11, backgroundColor: '#FFF',
+  },
+  studentRowBorder: { borderTopWidth: 1, borderTopColor: '#F8FAFC' },
+  studentName: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
+  studentRoll: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 1 },
+  statusBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10,
+  },
+  statusBadgeTxt: { fontSize: 11, fontWeight: '800' },
+
+  statusBadgeTxt: { fontSize: 11, fontWeight: '800' },
 });
 

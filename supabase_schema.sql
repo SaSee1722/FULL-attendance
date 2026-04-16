@@ -3,8 +3,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
-  role TEXT CHECK (role IN ('dean', 'staff')) NOT NULL DEFAULT 'staff',
+  role TEXT CHECK (role IN ('admin', 'hod', 'staff')) NOT NULL DEFAULT 'staff',
   department TEXT,
+  is_approved BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -70,14 +71,14 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
 -- ── DROP EXISTING POLICIES ───────────────────
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
 DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
-DROP POLICY IF EXISTS "Classes viewable by relevant department staff/dean" ON public.classes;
-DROP POLICY IF EXISTS "Deans can manage classes in their department" ON public.classes;
-DROP POLICY IF EXISTS "Students viewable by relevant staff/dean" ON public.students;
-DROP POLICY IF EXISTS "Deans can manage students" ON public.students;
-DROP POLICY IF EXISTS "Attendance records viewable by staff/dean" ON public.attendance_records;
+DROP POLICY IF EXISTS "Classes viewable by relevant department staff/hod" ON public.classes;
+DROP POLICY IF EXISTS "HODs can manage classes in their department" ON public.classes;
+DROP POLICY IF EXISTS "Students viewable by relevant staff/hod" ON public.students;
+DROP POLICY IF EXISTS "HODs can manage students" ON public.students;
+DROP POLICY IF EXISTS "Attendance records viewable by staff/hod" ON public.attendance_records;
 DROP POLICY IF EXISTS "Staff can mark attendance" ON public.attendance_records;
 DROP POLICY IF EXISTS "Holidays viewable by department" ON public.holidays;
-DROP POLICY IF EXISTS "Deans can manage holidays" ON public.holidays;
+DROP POLICY IF EXISTS "HODs can manage holidays" ON public.holidays;
 DROP POLICY IF EXISTS "Activity logs viewable by department" ON public.activity_logs;
 
 -- Policies for Profiles
@@ -85,25 +86,25 @@ CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR 
 CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
 -- Policies for Classes
-CREATE POLICY "Classes viewable by relevant department staff/dean" 
+CREATE POLICY "Classes viewable by relevant department staff/hod" 
 ON public.classes FOR SELECT 
 USING (
-  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'dean' 
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod' 
   AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
   OR 
   (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'staff' 
   AND (LOWER(advisor) = LOWER((SELECT name FROM public.profiles WHERE id = auth.uid())) OR LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid())))
 );
 
-CREATE POLICY "Deans can manage classes in their department" 
+CREATE POLICY "HODs can manage classes in their department" 
 ON public.classes FOR ALL 
 USING (
-  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'dean' 
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod' 
   AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
 -- Policies for Students
-CREATE POLICY "Students viewable by relevant staff/dean" 
+CREATE POLICY "Students viewable by relevant staff/hod" 
 ON public.students FOR SELECT 
 USING (
   EXISTS (
@@ -111,25 +112,25 @@ USING (
     JOIN public.profiles p ON p.id = auth.uid()
     WHERE c.id = students.class_id
     AND (
-      (p.role = 'dean' AND LOWER(c.department) = LOWER(p.department)) 
+      (p.role = 'hod' AND LOWER(c.department) = LOWER(p.department)) 
       OR (p.role = 'staff' AND LOWER(c.advisor) = LOWER(p.name))
     )
   )
 );
 
-CREATE POLICY "Deans can manage students" 
+CREATE POLICY "HODs can manage students" 
 ON public.students FOR ALL 
 USING (
   EXISTS (
     SELECT 1 FROM public.classes c
     JOIN public.profiles p ON p.id = auth.uid()
     WHERE c.id = students.class_id
-    AND p.role = 'dean' AND LOWER(c.department) = LOWER(p.department)
+    AND p.role = 'hod' AND LOWER(c.department) = LOWER(p.department)
   )
 );
 
 -- Policies for Attendance
-CREATE POLICY "Attendance records viewable by staff/dean" 
+CREATE POLICY "Attendance records viewable by staff/hod" 
 ON public.attendance_records FOR SELECT 
 USING (
   EXISTS (
@@ -137,7 +138,7 @@ USING (
     JOIN public.profiles p ON p.id = auth.uid()
     WHERE c.id = attendance_records.class_id
     AND (
-      (p.role = 'dean' AND LOWER(c.department) = LOWER(p.department)) 
+      (p.role = 'hod' AND LOWER(c.department) = LOWER(p.department)) 
       OR (p.role = 'staff' AND LOWER(c.advisor) = LOWER(p.name))
     )
   )
@@ -152,7 +153,7 @@ USING (
     WHERE c.id = attendance_records.class_id
     AND (
       (p.role = 'staff' AND LOWER(c.advisor) = LOWER(p.name))
-      OR (p.role = 'dean' AND LOWER(c.department) = LOWER(p.department))
+      OR (p.role = 'hod' AND LOWER(c.department) = LOWER(p.department))
     )
   )
 );
@@ -164,10 +165,10 @@ USING (
   LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
-CREATE POLICY "Deans can manage holidays" 
+CREATE POLICY "HODs can manage holidays" 
 ON public.holidays FOR ALL 
 USING (
-  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'dean'
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod'
   AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
@@ -203,13 +204,17 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, name, role, department)
+  INSERT INTO public.profiles (id, email, name, role, department, is_approved)
   VALUES (
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'name', NEW.raw_user_meta_data->>'full_name', NEW.email),
     COALESCE(NEW.raw_user_meta_data->>'role', 'staff'),
-    NEW.raw_user_meta_data->>'department'
+    NEW.raw_user_meta_data->>'department',
+    CASE 
+      WHEN (NEW.raw_user_meta_data->>'role') = 'hod' THEN FALSE 
+      ELSE TRUE 
+    END
   );
   RETURN NEW;
 END;

@@ -72,8 +72,14 @@ export default function StaffProfile() {
       if (!result.canceled && result.assets[0]) {
         setUploadingImage(true);
         const uri = result.assets[0].uri;
-        await authService.updateProfileImage(uri);
-        setImageUri(uri);
+        const uploadedUrl = await authService.updateProfileImage(uri);
+        setImageUri(uploadedUrl || uri);
+        
+        // Clear classes cache so dashboard cards update
+        const { dataService } = await import('../../services/dataService');
+        dataService.clearCachePrefix('classes_');
+        dataService.clearCachePrefix('profile_');
+        
         if (refreshUser) await refreshUser();
       }
     } catch (e: any) {
@@ -107,7 +113,9 @@ export default function StaffProfile() {
     ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
     : '??';
 
-  const staffId = user?.id ? `#MS-${user.id.slice(-5).toUpperCase()}` : '#MS-XXXXX';
+  const staffId = user?.staffId 
+    ? user.staffId 
+    : (user?.id ? `#MS-${user.id.slice(-5).toUpperCase()}` : '#MS-XXXXX');
 
   return (
     <View style={styles.root}>
