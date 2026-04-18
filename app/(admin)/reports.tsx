@@ -3,13 +3,14 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable, Touch
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { dataService, ClassData } from '../../services/dataService';
 import { colors, typography, spacing, shadows, gradients } from '../../constants/theme';
 
 export default function AdminReports() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [allClasses, setAllClasses] = useState<ClassData[]>([]);
@@ -17,10 +18,20 @@ export default function AdminReports() {
   const [attendanceLogs, setAttendanceLogs] = useState<any[]>([]);
   const [allLogs, setAllLogs] = useState<any[]>([]);
   const [departments, setDepartments] = useState<string[]>(['All']);
+  const [deptSummary, setDeptSummary] = useState<any[]>([]);
   const [selectedDept, setSelectedDept] = useState('All');
 
   useEffect(() => {
     loadData();
+
+    // Live sync for reports when any attendance or class data changes
+    const subAttendance = dataService.subscribeToTable('attendance_records', () => loadData());
+    const subClasses = dataService.subscribeToTable('classes', () => loadData());
+    
+    return () => {
+      subAttendance?.unsubscribe?.();
+      subClasses?.unsubscribe?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -44,6 +55,8 @@ export default function AdminReports() {
       setAllClasses(initialClasses);
       setAllLogs(initialLogs);
       setStats(statsData);
+      
+      setDeptSummary(deptSummary || []);
       
       const deptNames = ['All', ...new Set((deptSummary || []).map(d => d.name))];
       setDepartments(deptNames);
@@ -157,7 +170,48 @@ export default function AdminReports() {
         contentContainerStyle={{ paddingBottom: 120, paddingTop: spacing.md }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.sectionHeader}>
+        {/* New Department Analytics Section */}
+        <View style={[styles.sectionHeader, { marginTop: spacing.lg }]}>
+          <Text style={styles.sectionTitle}>Department Analytics</Text>
+          <TouchableOpacity onPress={() => loadData()}>
+            <Text style={styles.actionLink}>Analyze All</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.deptCardList}>
+          {deptSummary
+            .filter(d => selectedDept === 'All' || d.name === selectedDept)
+            .map((dept, idx) => (
+            <TouchableOpacity 
+              key={idx} 
+              style={styles.deptCard}
+              onPress={() => router.push({
+                pathname: '/(admin)/department-report',
+                params: { departmentId: dept.name, departmentName: dept.name }
+              })}
+            >
+              <LinearGradient
+                colors={['#FFFFFF', '#F8FAFC']}
+                style={styles.deptCardGradient}
+              >
+                <View style={styles.deptCardTop}>
+                  <View style={styles.deptCardIcon}>
+                    <FontAwesome5 name="chart-line" size={14} color={colors.admin} />
+                  </View>
+                  <Text style={styles.deptCardRate}>{dept.averageRate}%</Text>
+                </View>
+                <Text style={styles.deptCardName} numberOfLines={1}>{dept.name}</Text>
+                <Text style={styles.deptCardStats}>{dept.classCount} Classes • {dept.studentCount} Students</Text>
+                <View style={styles.deptCardFooter}>
+                  <Text style={styles.deptCardLink}>View Trends</Text>
+                  <Ionicons name="arrow-forward" size={12} color={colors.admin} />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        <View style={[styles.sectionHeader, { marginTop: spacing.xl }]}>
           <Text style={styles.sectionTitle}>{selectedDept === 'All' ? 'System-Wide' : selectedDept} Records</Text>
           <View style={styles.badgeCount}>
             <Text style={styles.badgeText}>{attendanceLogs.length} Logs</Text>
@@ -305,4 +359,15 @@ const styles = StyleSheet.create({
   emptyContainer: { alignItems: 'center', padding: spacing.xl, backgroundColor: '#FFF', borderRadius: 24, ...shadows.sm, marginVertical: spacing.md, borderStyle: 'dashed', borderWidth: 1, borderColor: colors.border },
   emptyTitle: { ...typography.h3, fontSize: 16, marginTop: spacing.md, color: colors.textPrimary },
   emptyText: { ...typography.body, fontSize: 12, color: colors.textTertiary, textAlign: 'center', marginTop: 2 },
+  actionLink: { fontSize: 11, fontWeight: '800', color: colors.admin },
+  deptCardList: { paddingRight: spacing.xl, gap: 12, marginBottom: spacing.lg },
+  deptCard: { width: 160, borderRadius: 20, ...shadows.sm, overflow: 'hidden', borderWidth: 1, borderColor: '#F1F5F9' },
+  deptCardGradient: { padding: 15, flex: 1 },
+  deptCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  deptCardIcon: { width: 28, height: 28, borderRadius: 8, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center' },
+  deptCardRate: { fontSize: 14, fontWeight: '900', color: colors.textPrimary },
+  deptCardName: { fontSize: 13, fontWeight: '800', color: colors.textPrimary, marginBottom: 2 },
+  deptCardStats: { fontSize: 9, color: colors.textTertiary, fontWeight: '700' },
+  deptCardFooter: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 },
+  deptCardLink: { fontSize: 10, fontWeight: '800', color: colors.admin, textTransform: 'uppercase' },
 });

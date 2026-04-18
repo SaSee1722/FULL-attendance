@@ -13,7 +13,7 @@ export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { role } = useLocalSearchParams<{ role: UserRole }>();
-  const [selectedRole, setSelectedRole] = useState<UserRole>(role || 'hod');
+  const selectedRole: UserRole = role || 'hod';
   const [department, setDepartment] = useState('');
   const [showDeptModal, setShowDeptModal] = useState(false);
   const [loading, setLoading] = useState(false);

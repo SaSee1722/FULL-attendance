@@ -3,13 +3,14 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Dimensions, ActivityIndicator, Alert, Image,
 } from 'react-native';
-import { Download, Calendar, RefreshCcw, FileText, TrendingUp, Users, School, AlertCircle, BadgeCheck, Activity, User } from 'lucide-react-native';
+import { Download, Calendar, RefreshCcw, FileText, TrendingUp, Users, School, AlertCircle, BadgeCheck, Activity, User, ChevronLeft } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeInUp, FadeInRight, useAnimatedProps, useSharedValue, withTiming, withDelay, Easing } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Svg, Path, G, Text as SvgText, Defs, LinearGradient as SvgGradient, Stop, Circle, Rect } from 'react-native-svg';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { dataService } from '../../services/dataService';
 import { colors, spacing, shadows, gradients } from '../../constants/theme';
 import { format, startOfWeek, startOfMonth, isAfter, subDays } from 'date-fns';
@@ -20,7 +21,7 @@ const { width } = Dimensions.get('window');
 type Period = 'Today' | 'Week' | 'Month';
 
 // ─── Generate HTML for PDF ───────────────────────────────────
-const buildHTML = (logs: any[], period: string, stats: any) => `
+const buildHTML = (logs: any[], period: string, stats: any, deptName: string) => `
 <!DOCTYPE html>
 <html>
 <head>
@@ -42,7 +43,7 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
 </style>
 </head>
 <body>
-  <h1>HOD Attendance Report</h1>
+  <h1>${deptName} Attendance Report</h1>
   <p class="sub">Period: ${period} &nbsp;·&nbsp; Generated ${format(new Date(), 'dd MMM yyyy, hh:mm a')}</p>
   <div class="summary">
     <div class="stat-box"><div class="stat-val">${stats.totalClasses}</div><div class="stat-lbl">Classes</div></div>
@@ -52,7 +53,7 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
   <table>
     <tr><th>Class</th><th>Date</th><th>Marked By</th><th>Present</th><th>Absent</th><th>On Duty</th><th>Rate</th></tr>
     ${logs.map(l => {
-      const r = l.total > 0 ? Math.round(((l.present + l.onDuty) / l.total) * 100) : 0;
+      const r = l.totalStudents > 0 ? Math.round(((l.present + l.onDuty) / l.totalStudents) * 100) : 0;
       return `<tr>
         <td>${l.className}</td>
         <td>${l.date}</td>
@@ -70,9 +71,10 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-export default function HODReports() {
+export default function DepartmentReport() {
   const insets = useSafeAreaInsets();
-  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const { departmentId, departmentName } = useLocalSearchParams();
   const [period, setPeriod] = useState<Period>('Week');
   const [selectedDay, setSelectedDay] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [allLogs, setAllLogs] = useState<any[]>([]);
@@ -80,18 +82,19 @@ export default function HODReports() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
 
+  const deptId = departmentId as string;
+  const deptName = (departmentName as string) || 'Department';
+
   // Animation values
   const progress = useSharedValue(0);
 
   const fetchData = useCallback(async () => {
-    if (authLoading || !user) return;
     try {
       setLoading(true);
-      // Always bust cache so reports reflect the latest Supabase data
-      dataService.clearCache();
+      // Pass deptId to fetch departmental specific data
       const [logs, st] = await Promise.all([
-        dataService.getAttendanceLogs(500),
-        dataService.getStatistics(),
+        dataService.getAttendanceLogs(500, deptId),
+        dataService.getStatistics(deptId),
       ]);
       setAllLogs(logs);
       setStats(st);
@@ -103,20 +106,18 @@ export default function HODReports() {
     } finally {
       setLoading(false);
     }
-  }, [user, authLoading]);
+  }, [deptId]);
 
   useEffect(() => {
-    if (!authLoading && user) {
-      fetchData();
-      const subAttendance = dataService.subscribeToTable('attendance_records', fetchData);
-      const subClasses = dataService.subscribeToTable('classes', fetchData);
-      
-      return () => {
-        subAttendance?.unsubscribe();
-        subClasses?.unsubscribe();
-      };
-    }
-  }, [fetchData, authLoading, user]);
+    fetchData();
+    const subAttendance = dataService.subscribeToTable('attendance_records', fetchData);
+    const subClasses = dataService.subscribeToTable('classes', fetchData);
+    
+    return () => {
+      subAttendance?.unsubscribe();
+      subClasses?.unsubscribe();
+    };
+  }, [fetchData]);
 
 
   // 1. Calculations first
@@ -137,7 +138,6 @@ export default function HODReports() {
 
   const focusLogs = useMemo(() => filteredLogs.filter(l => (l.date || '').substring(0, 10) === selectedDay), [filteredLogs, selectedDay]);
 
-  // Aggregate stats for the selected period (Today/Week/Month)
   const periodTotals = useMemo(() => filteredLogs.reduce((s, l) => ({
     p: s.p + (l.present || 0),
     a: s.a + (l.absent || 0),
@@ -157,14 +157,11 @@ export default function HODReports() {
     sess: s.sess + 1
   }), { p: 0, a: 0, o: 0, tot: 0, sess: 0 }), [focusLogs]);
 
-
-  // Calculate marking completion
   const markingCompletion = useMemo(() => {
     if (stats.totalClasses === 0) return 0;
     return Math.round((dayTotals.sess / stats.totalClasses) * 100);
   }, [dayTotals.sess, stats.totalClasses]);
 
-  // 2. Group by class
   const classReports = useMemo(() => {
     const classSummary: Record<string, { logs: any[]; className: string; markedBy: string; advisorImage?: string }> = {};
     focusLogs.forEach(l => {
@@ -195,7 +192,6 @@ export default function HODReports() {
     });
   }, [focusLogs]);
 
-  // 3. Effects
   useEffect(() => {
     if (!loading) {
       progress.value = withDelay(500, withTiming(periodGrandRate / 100, {
@@ -212,7 +208,6 @@ export default function HODReports() {
     };
   });
 
-  // Trend line from daily totals - Custom grouping based on period
   const dailyPoints = useMemo(() => {
     const now = new Date();
     if (period === 'Today') {
@@ -257,9 +252,10 @@ export default function HODReports() {
     if (period === 'Month') {
       const weeks = [];
       for (let i = 3; i >= 0; i--) {
+        let p=0, a=0, o=0;
         const weekEnd = subDays(now, i * 7);
         const weekStart = subDays(weekEnd, 6);
-        let p=0, a=0, o=0;
+        let weekLabel = `W${4-i}`; 
         allLogs.forEach(l => {
           const logDate = new Date(l.date);
           if (l.date && !isNaN(logDate.getTime())) {
@@ -271,8 +267,8 @@ export default function HODReports() {
         const t = p + a + o;
         weeks.push({
           rate: t > 0 ? Math.round(((p + o) / t) * 100) : -1,
-          label: `W${4-i}`,
-          day: `W${4-i}`,
+          label: weekLabel,
+          day: weekLabel,
           fullDate: format(weekEnd, 'yyyy-MM-dd')
         });
       }
@@ -281,7 +277,7 @@ export default function HODReports() {
     return [];
   }, [allLogs, period]);
 
-  const svgW = width - 48; // Wider chart
+  const svgW = width - 48;
   const CHART_HEIGHT = 160;
   const PADDING = 20;
 
@@ -304,14 +300,13 @@ export default function HODReports() {
   const areaPath = useMemo(() => {
     if (points.length === 0) return '';
     const baseLine = CHART_HEIGHT - 30;
-    // Connect from Origin (Left Baseline) -> Line -> Right Baseline -> Back to Origin
     return `M ${PADDING} ${baseLine} ${linePath.replace('M', 'L')} L ${points[points.length - 1].x} ${baseLine} Z`;
   }, [points, linePath]);
 
   const downloadReport = async () => {
     try {
       setDownloading(true);
-      const html = buildHTML(filteredLogs, period, stats);
+      const html = buildHTML(filteredLogs, period, stats, deptName);
       const { uri } = await Print.printToFileAsync({ html });
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
@@ -324,11 +319,11 @@ export default function HODReports() {
     } finally { setDownloading(false); }
   };
 
-  const downloadClassReport = async (cls: typeof classReports[0]) => {
+  const downloadClassReport = async (cls: any) => {
     try {
       const html = buildHTML(filteredLogs.filter(l => l.className === cls.className), period, {
         totalClasses: 1, presentToday: cls.present, absentToday: cls.absent,
-      });
+      }, deptName);
       const { uri } = await Print.printToFileAsync({ html });
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
@@ -342,10 +337,15 @@ export default function HODReports() {
         <LinearGradient colors={gradients.premium as any} style={[styles.headerGradient, { paddingTop: insets.top + 10 }]}>
           
           <View style={styles.topBar}>
-            <Animated.View entering={FadeInDown.delay(100).duration(800)}>
-              <Text style={styles.welcomeTxt}>Report Center</Text>
-              <Text style={styles.headerTitle}>Attendance Analysis</Text>
-            </Animated.View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Pressable onPress={() => router.back()} style={styles.backBtn}>
+                <ChevronLeft size={24} color="#FFF" />
+              </Pressable>
+              <Animated.View entering={FadeInDown.delay(100).duration(800)}>
+                <Text style={styles.welcomeTxt}>{deptName}</Text>
+                <Text style={styles.headerTitle}>Trend Analysis</Text>
+              </Animated.View>
+            </View>
             <View style={styles.headerActions}>
               <Pressable onPress={downloadReport} style={styles.actionBtn}>
                 <Download size={20} color="#FFF" />
@@ -363,13 +363,10 @@ export default function HODReports() {
                 <Circle cx="50" cy="50" r="45" stroke="rgba(255,255,255,0.1)" strokeWidth="6" fill="none" />
                 <AnimatedCircle
                   cx="50" cy="50" r="45"
-                  stroke="#10B981"
-                  strokeWidth="8"
-                  fill="none"
+                  stroke="#10B981" strokeWidth="8" fill="none"
                   strokeDasharray={`${2 * Math.PI * 45}`}
                   animatedProps={animatedProps}
-                  strokeLinecap="round"
-                  transform="rotate(-90 50 50)"
+                  strokeLinecap="round" transform="rotate(-90 50 50)"
                 />
                 <SvgText x="50" y="48" fontSize="22" fontWeight="900" fill="#FFF" textAnchor="middle">
                   {loading ? '—' : `${periodGrandRate}%`}
@@ -408,7 +405,7 @@ export default function HODReports() {
 
         {/* Floating Filter Pills */}
         <Animated.View entering={FadeInUp.delay(600).duration(800)} style={[styles.floatingFilters, shadows.premium]}>
-          {(['Today', 'Week', 'Month'] as Period[]).map((p, idx) => (
+          {(['Today', 'Week', 'Month'] as Period[]).map((p) => (
             <Pressable key={p} onPress={() => {
               setPeriod(p);
               if (p === 'Today') setSelectedDay(format(new Date(), 'yyyy-MM-dd'));
@@ -421,7 +418,6 @@ export default function HODReports() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {/* Day Header */}
         <Animated.View entering={FadeInDown.delay(700).duration(800)} style={styles.dayHeader}>
           <View>
             <Text style={styles.secTitle}>Daily Overview</Text>
@@ -434,9 +430,7 @@ export default function HODReports() {
 
         <View style={styles.reportSummaryPanel}>
           <View style={styles.summaryItem}>
-            <View style={styles.summaryIcon}>
-              <Activity size={18} color={colors.primaryBlue} />
-            </View>
+            <View style={styles.summaryIcon}><Activity size={18} color={colors.primaryBlue} /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.summaryLbl}>Marking Status</Text>
               <Text style={styles.summaryVal}>{dayTotals.sess} of {stats.totalClasses} Classes Done</Text>
@@ -445,24 +439,13 @@ export default function HODReports() {
               {markingCompletion}%
             </Text>
           </View>
-          
           <View style={[styles.summaryDivider, { marginVertical: 12 }]} />
-          
           <View style={styles.summaryGrid}>
-             <View style={styles.summaryStat}>
-               <Text style={styles.statSubVal}>{dayTotals.p}</Text>
-               <Text style={styles.statSubLbl}>Present</Text>
-             </View>
+             <View style={styles.summaryStat}><Text style={styles.statSubVal}>{dayTotals.p}</Text><Text style={styles.statSubLbl}>Present</Text></View>
              <View style={styles.summaryVerticalDivider} />
-             <View style={styles.summaryStat}>
-               <Text style={styles.statSubVal}>{dayTotals.a}</Text>
-               <Text style={styles.statSubLbl}>Absent</Text>
-             </View>
+             <View style={styles.summaryStat}><Text style={styles.statSubVal}>{dayTotals.a}</Text><Text style={styles.statSubLbl}>Absent</Text></View>
              <View style={styles.summaryVerticalDivider} />
-             <View style={styles.summaryStat}>
-               <Text style={styles.statSubVal}>{dayTotals.o}</Text>
-               <Text style={styles.statSubLbl}>On Duty</Text>
-             </View>
+             <View style={styles.summaryStat}><Text style={styles.statSubVal}>{dayTotals.o}</Text><Text style={styles.statSubLbl}>On Duty</Text></View>
           </View>
         </View>
 
@@ -471,164 +454,54 @@ export default function HODReports() {
           <View style={styles.chartTop}>
             <View>
               <Text style={styles.chartTitle}>Attendance Trend</Text>
-              <Text style={styles.chartSub}>
-                {dailyPoints.filter(p => p.rate >= 0).length} day{dailyPoints.filter(p => p.rate >= 0).length !== 1 ? 's' : ''} with data in {period.toLowerCase()} period
-              </Text>
+              <Text style={styles.chartSub}>{dailyPoints.length} day{dailyPoints.length !== 1 ? 's' : ''} in {period.toLowerCase()} period</Text>
             </View>
-            <Pressable onPress={fetchData}>
-              <RefreshCcw size={20} color="#94A3B8" />
-            </Pressable>
+            <Pressable onPress={fetchData}><RefreshCcw size={20} color="#94A3B8" /></Pressable>
           </View>
           {loading
             ? <ActivityIndicator color={colors.primaryBlue} style={{ marginVertical: 40 }} />
             : <View style={{ alignItems: 'center' }}>
                 <Svg height={CHART_HEIGHT} width={svgW} viewBox={`0 0 ${svgW} ${CHART_HEIGHT}`}>
-                  {/* Grid Lines & Labels */}
                   {[0, 0.25, 0.5, 0.75, 1].map(v => {
                     const y = getY(v * 100);
                     return (
                       <G key={v}>
-                        <Path 
-                          d={`M ${PADDING} ${y} H ${svgW - PADDING}`} 
-                          stroke="#F1F5F9" 
-                          strokeWidth="1" 
-                          strokeDasharray="4 4"
-                        />
-                        {v > 0 && (
-                          <SvgText
-                            x={PADDING - 5}
-                            y={y + 3}
-                            fontSize="9"
-                            fill="#94A3B8"
-                            textAnchor="end"
-                            fontWeight="600"
-                          >
-                            {Math.round(v * 100)}%
-                          </SvgText>
-                        )}
+                        <Path d={`M ${PADDING} ${y} H ${svgW - PADDING}`} stroke="#F1F5F9" strokeWidth="1" strokeDasharray="4 4" />
+                        {v > 0 && <SvgText x={PADDING - 5} y={y + 3} fontSize="9" fill="#94A3B8" textAnchor="end" fontWeight="600">{Math.round(v * 100)}%</SvgText>}
                       </G>
                     );
                   })}
-
-                  {/* Area Fill Gradient */}
                   <Defs>
                     <SvgGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
                       <Stop offset="0" stopColor={colors.primaryBlue} stopOpacity="0.3" />
                       <Stop offset="1" stopColor={colors.primaryBlue} stopOpacity="0" />
                     </SvgGradient>
                   </Defs>
-
-                  {/* Horizontal Baseline (X-Axis) */}
-                  <Path 
-                    d={`M ${PADDING} ${CHART_HEIGHT - 30} H ${svgW - PADDING}`} 
-                    stroke="#E2E8F0" 
-                    strokeWidth="2" 
-                  />
-
-                  {/* Area Fill */}
-                  {points.length > 0 && (
-                    <Path
-                      d={`${areaPath}`}
-                      fill="url(#areaGrad)"
-                    />
-                  )}
-
-                  {/* Main Trend Line connecting from origin */}
+                  <Path d={`M ${PADDING} ${CHART_HEIGHT - 30} H ${svgW - PADDING}`} stroke="#E2E8F0" strokeWidth="2" />
+                  {points.length > 0 && <Path d={`${areaPath}`} fill="url(#areaGrad)" />}
                   {points.length > 0 && points.some(p => p.y < CHART_HEIGHT - 30) && (
-                    <Path
-                      d={`M ${PADDING} ${CHART_HEIGHT - 30} ${linePath.replace('M', 'L')}`}
-                      stroke={colors.primaryBlue}
-                      strokeWidth="3"
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                    <Path d={`M ${PADDING} ${CHART_HEIGHT - 30} ${linePath.replace('M', 'L')}`}
+                      stroke={colors.primaryBlue} strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round"
                     />
                   )}
-
-                  {/* Points (with glow, drop lines, and value labels) */}
                   {points.map((p, i) => {
                     if (dailyPoints[i].rate < 0) return null;
                     const isSel = dailyPoints[i]?.fullDate === selectedDay;
-                    const rateVal = dailyPoints[i]?.rate;
-                    const baseLine = CHART_HEIGHT - 30;
-                    
                     return (
                       <G key={i} onPress={() => setSelectedDay(dailyPoints[i].fullDate)}>
-                        {/* Drop Line from 0% */}
-                        <Path 
-                          d={`M ${p.x} ${baseLine} L ${p.x} ${p.y}`} 
-                          stroke={colors.primaryBlue} 
-                          strokeWidth="1.5" 
-                          strokeDasharray="4 4"
-                          opacity={isSel ? 0.6 : 0.2}
-                        />
-
-                        {/* Interactive focus area */}
+                        <Path d={`M ${p.x} ${CHART_HEIGHT - 30} L ${p.x} ${p.y}`} stroke={colors.primaryBlue} strokeWidth="1.5" strokeDasharray="4 4" opacity={isSel ? 0.6 : 0.2} />
                         <Rect x={p.x - 20} y={0} width={40} height={CHART_HEIGHT} fill="transparent" />
-                        
-                        {/* Outer Glow Ring */}
-                        {isSel && (
-                          <Circle cx={p.x} cy={p.y} r="10" fill={colors.primaryBlue} opacity="0.15" />
-                        )}
-                        
-                        {/* Main Point */}
-                        <Circle 
-                          cx={p.x} cy={p.y} r={isSel ? "6" : "4"} 
-                          fill="#FFF" stroke={colors.primaryBlue} strokeWidth={isSel ? "3" : "2"} 
-                        />
-
-                        {/* Value Label above point */}
-                        {isSel && (
-                          <SvgText 
-                            x={p.x} y={p.y - 12} 
-                            fontSize="11" fontWeight="900" fill={colors.primaryBlue} 
-                            textAnchor="middle"
-                          >
-                            {rateVal}%
-                          </SvgText>
-                        )}
+                        {isSel && <Circle cx={p.x} cy={p.y} r="10" fill={colors.primaryBlue} opacity="0.15" />}
+                        <Circle cx={p.x} cy={p.y} r={isSel ? "6" : "4"} fill="#FFF" stroke={colors.primaryBlue} strokeWidth={isSel ? "3" : "2"} />
+                        {isSel && <SvgText x={p.x} y={p.y - 12} fontSize="11" fontWeight="900" fill={colors.primaryBlue} textAnchor="middle">{dailyPoints[i].rate}%</SvgText>}
                       </G>
                     );
                   })}
-
-                  {/* X-Axis Labels */}
                   {dailyPoints.map((p, i) => {
                     const x = getX(i);
-                    const y = getY(p.rate);
                     const showLabel = dailyPoints.length < 10 || i % Math.ceil(dailyPoints.length / 7) === 0;
-                    return (
-                      <React.Fragment key={i}>
-                        {/* Point Marker */}
-                        {dailyPoints[i].rate >= 0 && (
-                          <Circle cx={x} cy={y} r="4" fill="#FFF" stroke={colors.primaryBlue} strokeWidth="2" />
-                        )}
-                        
-                        {/* X-Axis Labels */}
-                        {showLabel && (
-                          <G>
-                            <SvgText
-                              x={x}
-                              y={CHART_HEIGHT - 10}
-                              fontSize="10"
-                              fill="#64748B"
-                              textAnchor="middle"
-                              fontWeight="600"
-                            >
-                              {p.label}
-                            </SvgText>
-                          </G>
-                        )}
-                      </React.Fragment>
-                    );
+                    return showLabel && <SvgText key={i} x={x} y={CHART_HEIGHT - 10} fontSize="10" fill="#64748B" textAnchor="middle" fontWeight="600">{p.label}</SvgText>;
                   })}
-
-                  {/* Gradient Definition */}
-                  <Defs>
-                    <SvgGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0" stopColor={colors.primaryBlue} stopOpacity="0.4" />
-                      <Stop offset="1" stopColor={colors.primaryBlue} stopOpacity="0.01" />
-                    </SvgGradient>
-                  </Defs>
                 </Svg>
               </View>
           }
@@ -636,104 +509,50 @@ export default function HODReports() {
 
         {/* Short Class Reports */}
         <View style={styles.secRow}>
-          <Text style={styles.secTitle}>Class Reports</Text>
-          <View style={styles.countPill}>
-            <Text style={styles.countPillText}>{classReports.length}</Text>
-          </View>
+          <Text style={styles.secTitle}>Records Breakdown</Text>
+          <View style={styles.countPill}><Text style={styles.countPillText}>{classReports.length}</Text></View>
         </View>
 
         {loading
           ? <ActivityIndicator color={colors.primaryBlue} style={{ marginVertical: 24 }} />
           : classReports.length === 0
-            ? <View style={[styles.emptyCard, shadows.sm]}>
-                <FileText size={48} color="#CBD5E1" />
-                <Text style={styles.emptyTitle}>No records for this period</Text>
-                <Text style={styles.emptyDesc}>Ask your HOD to assign classes to your account.</Text>
-              </View>
+            ? <View style={styles.emptyCard}><FileText size={48} color="#CBD5E1" /><Text style={styles.emptyTitle}>No records</Text></View>
             : classReports.map((cls, idx) => {
-                const pal = [
-                  { bg: '#EEF2FF', color: '#4F46E5' },
-                  { bg: '#ECFDF5', color: '#059669' },
-                  { bg: '#EFF6FF', color: '#2563EB' },
-                  { bg: '#FFF7ED', color: '#D97706' },
-                ][idx % 4];
                 const good = cls.rate >= 75;
+                const pal = [{ bg: '#EEF2FF', color: '#4F46E5' }, { bg: '#ECFDF5', color: '#059669' }, { bg: '#EFF6FF', color: '#2563EB' }, { bg: '#FFF7ED', color: '#D97706' }][idx % 4];
                 return (
                   <View key={`${cls.className}-${idx}`} style={[styles.clsCard, shadows.sm]}>
                     <View style={styles.clsTop}>
-                      <View style={[styles.clsBadge, { backgroundColor: pal.bg, overflow: 'hidden' }]}>
-                        {cls.advisorImage ? (
-                          <Image source={{ uri: cls.advisorImage }} style={{ width: '100%', height: '100%' }} />
-                        ) : (
-                          <User size={20} color={pal.color} />
-                        )}
+                      <View style={[styles.clsBadge, { backgroundColor: pal.bg }]}>
+                        {cls.advisorImage ? <Image source={{ uri: cls.advisorImage }} style={{ width: '100%', height: '100%' }} /> : <User size={20} color={pal.color} />}
                       </View>
                       <View style={styles.clsInfo}>
-                        <Text style={styles.clsName}>{cls.className}</Text>
-                        <Text style={styles.clsMeta}>
-                          Marked by {cls.markedBy}  ·  {cls.sessions} session{cls.sessions !== 1 ? 's' : ''}
-                        </Text>
+                         <Text style={styles.clsName}>{cls.className}</Text>
+                         <Text style={styles.clsMeta}>Marked by {cls.markedBy} · {cls.sessions} sessions</Text>
                       </View>
-                      <View style={[styles.rateBadge, { backgroundColor: good ? '#ECFDF5' : '#FFF1F2' }]}>
-                        <Text style={[styles.rateText, { color: good ? '#059669' : '#EF4444' }]}>
-                          {cls.rate}%
-                        </Text>
-                      </View>
+                      <View style={[styles.rateBadge, { backgroundColor: good ? '#ECFDF5' : '#FFF1F2' }]}><Text style={[styles.rateText, { color: good ? '#059669' : '#EF4444' }]}>{cls.rate}%</Text></View>
                     </View>
-
-                    {/* Stats bar */}
                     <View style={styles.clsStats}>
-                      <View style={styles.stuStatItem}>
-                        <View style={[styles.statDot, { backgroundColor: '#10B981' }]} />
-                        <Text style={styles.statLbl}>Present</Text>
-                        <Text style={styles.statVal}>{cls.present}</Text>
-                      </View>
-                      <View style={styles.stuStatItem}>
-                        <View style={[styles.statDot, { backgroundColor: '#EF4444' }]} />
-                        <Text style={styles.statLbl}>Absent</Text>
-                        <Text style={styles.statVal}>{cls.absent}</Text>
-                      </View>
-                      <View style={styles.stuStatItem}>
-                        <View style={[styles.statDot, { backgroundColor: '#F59E0B' }]} />
-                        <Text style={styles.statLbl}>On Duty</Text>
-                        <Text style={styles.statVal}>{cls.onDuty}</Text>
-                      </View>
-                      <Pressable onPress={() => downloadClassReport(cls)} style={styles.miniDlBtn}>
-                        <Download size={16} color={colors.primaryBlue} />
-                        <Text style={styles.miniDlText}>PDF</Text>
-                      </Pressable>
+                       {[{ l: 'Present', v: cls.present, c: '#10B981' }, { l: 'Absent', v: cls.absent, c: '#EF4444' }, { l: 'On Duty', v: cls.onDuty, c: '#F59E0B' }].map(s => (
+                         <View key={s.l} style={styles.stuStatItem}><View style={[styles.statDot, { backgroundColor: s.c }]} /><Text style={styles.statLbl}>{s.l}</Text><Text style={styles.statVal}>{s.v}</Text></View>
+                       ))}
+                       <Pressable onPress={() => downloadClassReport(cls)} style={styles.miniDlBtn}><Download size={16} color={colors.primaryBlue} /><Text style={styles.miniDlText}>PDF</Text></Pressable>
                     </View>
-
-                    {/* Attendance bar */}
-                    {cls.total > 0 && (
-                      <View style={styles.attBarBg}>
-                        <View style={[styles.attBarFill, { width: `${cls.rate}%` as any,
-                          backgroundColor: good ? '#10B981' : '#EF4444' }]} />
-                      </View>
-                    )}
+                    <View style={styles.attBarBg}><View style={[styles.attBarFill, { width: `${cls.rate}%` as any, backgroundColor: good ? '#10B981' : '#EF4444' }]} /></View>
                   </View>
                 );
               })
         }
 
-        {/* Overall + download CTA */}
-        <LinearGradient colors={[colors.primaryBlue, '#1E40AF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-          style={[styles.ctaCard, shadows.md]}>
+        <LinearGradient colors={[colors.primaryBlue, '#1E40AF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.ctaCard, shadows.md]}>
           <View style={styles.ctaContent}>
-            <Text style={styles.ctaTitle}>Download Full Report</Text>
-            <Text style={styles.ctaDesc}>
-              Export all {filteredLogs.length} attendance records for the {period} period as a PDF.
-            </Text>
-            <Pressable onPress={downloadReport} style={[styles.ctaBtn, downloading && { opacity: 0.6 }]} disabled={downloading}>
-              {downloading
-                ? <ActivityIndicator color={colors.primaryBlue} size="small" />
-                : <Text style={styles.ctaBtnText}>Generate PDF</Text>
-              }
+            <Text style={styles.ctaTitle}>Export {deptName} Report</Text>
+            <Text style={styles.ctaDesc}>Download all records for this period as a formal PDF.</Text>
+            <Pressable onPress={downloadReport} style={styles.ctaBtn} disabled={downloading}>
+              {downloading ? <ActivityIndicator color={colors.primaryBlue} /> : <Text style={styles.ctaBtnText}>Generate PDF</Text>}
             </Pressable>
           </View>
-          <View style={styles.ctaIconWrap}>
-            <TrendingUp size={80} color="rgba(255,255,255,0.1)" />
-          </View>
+          <View style={styles.ctaIconWrap}><TrendingUp size={80} color="rgba(255,255,255,0.1)" /></View>
         </LinearGradient>
       </ScrollView>
     </View>
@@ -742,203 +561,72 @@ export default function HODReports() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F8FAFC' },
-  // Header
-  headerContainer: {
-    backgroundColor: '#F8FAFC',
-    zIndex: 10,
-  },
-  headerGradient: {
-    paddingBottom: 60,
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
-    paddingHorizontal: spacing.lg,
-  },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 25,
-  },
+  headerContainer: { backgroundColor: '#F8FAFC', zIndex: 10 },
+  headerGradient: { paddingBottom: 60, borderBottomLeftRadius: 40, borderBottomRightRadius: 40, paddingHorizontal: spacing.lg },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25 },
+  backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   welcomeTxt: { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: '600', letterSpacing: 0.5 },
-  headerTitle: { fontSize: 24, fontWeight: '900', color: '#FFF', marginTop: 4, letterSpacing: -0.5 },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: '#FFF', marginTop: 4 },
   headerActions: { flexDirection: 'row', gap: 10 },
-  actionBtn: {
-    width: 40, height: 40,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    justifyContent: 'center', alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
-  },
-  headerMainContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 20,
-  },
-  gaugeSection: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 30,
-    padding: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  headerStatsGrid: {
-    flex: 1,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  headerStatCard: {
-    width: '47%',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 18,
-    padding: 12,
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  headerStatVal: { fontSize: 18, fontWeight: '900', color: '#FFF', marginVertical: 2 },
+  actionBtn: { width: 40, height: 40, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  headerMainContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 20 },
+  gaugeSection: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 30, padding: 5, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  headerStatsGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  headerStatCard: { width: '47%', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 18, padding: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  headerStatVal: { fontSize: 18, fontWeight: '900', color: '#FFF' },
   headerStatLbl: { fontSize: 9, color: 'rgba(255,255,255,0.4)', fontWeight: '700', textTransform: 'uppercase' },
-
-  // Floating Filters
-  floatingFilters: {
-    flexDirection: 'row',
-    backgroundColor: '#FFF',
-    marginHorizontal: spacing.xl,
-    borderRadius: 24,
-    padding: 6,
-    marginTop: -28,
-    alignSelf: 'center',
-    width: width - 60,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-  },
-  filterPill: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 20,
-  },
-  filterPillActive: {
-    backgroundColor: colors.primaryBlue,
-  },
+  floatingFilters: { position: 'absolute', bottom: -20, left: 20, right: 20, backgroundColor: '#FFF', borderRadius: 20, flexDirection: 'row', padding: 5 },
+  filterPill: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 15 },
+  filterPillActive: { backgroundColor: colors.primaryBlue },
   filterPillText: { fontSize: 13, fontWeight: '700', color: '#64748B' },
   filterPillTextActive: { color: '#FFF' },
-
-  // Body
-  body: { paddingHorizontal: spacing.lg, paddingTop: 35, paddingBottom: 100 },
-  dayHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 18,
-    paddingHorizontal: 4,
-  },
-  secTitle: { fontSize: 18, fontWeight: '800', color: '#1E293B', letterSpacing: -0.5 },
-  secSubtitle: { fontSize: 13, color: '#64748B', marginTop: 4, fontWeight: '500' },
-  dayAction: {
-    width: 36, height: 36,
-    backgroundColor: `${colors.primaryBlue}10`,
-    borderRadius: 10,
-    justifyContent: 'center', alignItems: 'center',
-  },
-
-  reportSummaryPanel: {
-    backgroundColor: '#FFF',
-    borderRadius: 24,
-    padding: 18,
-    marginBottom: 25,
-    borderWidth: 1,
-    borderColor: '#F1F5F9',
-  },
-  summaryItem: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  summaryIcon: { 
-    width: 36, height: 36, borderRadius: 10, 
-    backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' 
-  },
+  body: { padding: 20, paddingTop: 40, paddingBottom: 100 },
+  dayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  secTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A' },
+  secSubtitle: { fontSize: 12, color: '#64748B', fontWeight: '600' },
+  dayAction: { width: 40, height: 40, backgroundColor: '#EFF6FF', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  reportSummaryPanel: { backgroundColor: '#FFF', borderRadius: 24, padding: 20, marginBottom: 20, ...shadows.sm },
+  summaryItem: { flexDirection: 'row', alignItems: 'center', gap: 15 },
+  summaryIcon: { width: 36, height: 36, backgroundColor: '#EFF6FF', borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   summaryLbl: { fontSize: 11, color: '#64748B', fontWeight: '700', textTransform: 'uppercase' },
-  summaryVal: { fontSize: 14, fontWeight: '800', color: '#1E293B', marginTop: 1 },
+  summaryVal: { fontSize: 14, fontWeight: '800', color: '#0F172A' },
   summaryDivider: { height: 1, backgroundColor: '#F1F5F9' },
-  summaryGrid: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-  summaryStat: { alignItems: 'center', flex: 1 },
-  statSubVal: { fontSize: 18, fontWeight: '900', color: '#1E293B' },
-  statSubLbl: { fontSize: 10, color: '#64748B', fontWeight: '700' },
+  summaryGrid: { flexDirection: 'row', justifyContent: 'space-between' },
+  summaryStat: { flex: 1, alignItems: 'center' },
+  statSubVal: { fontSize: 18, fontWeight: '900', color: '#0F172A' },
+  statSubLbl: { fontSize: 9, color: '#64748B', fontWeight: '800', textTransform: 'uppercase' },
   summaryVerticalDivider: { width: 1, height: 25, backgroundColor: '#F1F5F9' },
-
-  chartCard: {
-    backgroundColor: '#FFF', borderRadius: 28,
-    padding: 20, marginBottom: 25,
-    borderWidth: 1, borderColor: '#F1F5F9',
-  },
-  chartTop: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'flex-start', marginBottom: 20,
-  },
-  chartTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
-  chartSub: { fontSize: 12, color: '#64748B', marginTop: 3 },
-  
-  secRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 15 },
-  countPill: {
-    backgroundColor: `${colors.primaryBlue}10`, paddingHorizontal: 12,
-    paddingVertical: 5, borderRadius: 12,
-  },
-  countPillText: { fontSize: 12, fontWeight: '900', color: colors.primaryBlue },
-
-  emptyCard: {
-    backgroundColor: '#FFF', borderRadius: 24,
-    padding: 40, alignItems: 'center', gap: 12,
-    borderWidth: 1, borderColor: '#F1F5F9',
-  },
-  emptyTitle: { fontSize: 16, fontWeight: '800', color: '#1E293B' },
-  emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center', lineHeight: 18 },
-
-  clsCard: {
-    backgroundColor: '#FFF', borderRadius: 24,
-    padding: 16, marginBottom: 15,
-    borderWidth: 1, borderColor: '#F1F5F9',
-  },
-  clsTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
-  clsBadge: { width: 44, height: 44, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  chartCard: { backgroundColor: '#FFF', borderRadius: 24, padding: 20, marginBottom: 20 },
+  chartTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  chartTitle: { fontSize: 16, fontWeight: '900', color: '#0F172A' },
+  chartSub: { fontSize: 11, color: '#64748B', fontWeight: '600' },
+  secRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 15 },
+  countPill: { backgroundColor: colors.primaryBlue, paddingHorizontal: 10, paddingVertical: 2, borderRadius: 10 },
+  countPillText: { fontSize: 11, fontWeight: '900', color: '#FFF' },
+  clsCard: { backgroundColor: '#FFF', borderRadius: 24, padding: 15, marginBottom: 15 },
+  clsTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  clsBadge: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   clsInfo: { flex: 1 },
-  clsName: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
-  clsMeta: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  clsName: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
+  clsMeta: { fontSize: 11, color: '#64748B', fontWeight: '600' },
   rateBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-  rateText: { fontSize: 12, fontWeight: '900' },
-  
-  clsStats: {
-    flexDirection: 'row', alignItems: 'center', gap: 15,
-    marginBottom: 16,
-  },
-  stuStatItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statDot: { width: 7, height: 7, borderRadius: 4 },
-  statLbl: { fontSize: 11, color: '#64748B', fontWeight: '500' },
-  statVal: { fontSize: 12, fontWeight: '800', color: '#1E293B' },
-  miniDlBtn: {
-    marginLeft: 'auto',
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 6,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    borderWidth: 1, borderColor: '#E2E8F0',
-  },
-  miniDlText: { fontSize: 11, fontWeight: '800', color: '#64748B' },
-  attBarBg: {
-    height: 6, backgroundColor: '#F1F5F9',
-    borderRadius: 3, overflow: 'hidden',
-  },
+  rateText: { fontSize: 13, fontWeight: '900' },
+  clsStats: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, gap: 10 },
+  stuStatItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statDot: { width: 6, height: 6, borderRadius: 3 },
+  statLbl: { fontSize: 9, color: '#64748B', fontWeight: '700' },
+  statVal: { fontSize: 11, fontWeight: '800', color: '#0F172A' },
+  miniDlBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  miniDlText: { fontSize: 10, fontWeight: '900', color: colors.primaryBlue },
+  attBarBg: { height: 6, backgroundColor: '#F1F5F9', borderRadius: 3, marginTop: 15, overflow: 'hidden' },
   attBarFill: { height: '100%', borderRadius: 3 },
-
-  ctaCard: {
-    borderRadius: 28, marginTop: 20,
-    overflow: 'hidden', position: 'relative',
-  },
-  ctaContent: { padding: 24, zIndex: 1 },
-  ctaTitle: { fontSize: 20, fontWeight: '900', color: '#FFF', marginBottom: 6 },
-  ctaDesc: { fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 18, marginBottom: 20 },
-  ctaBtn: {
-    backgroundColor: '#FFF', paddingHorizontal: 25,
-    paddingVertical: 12, borderRadius: 14, alignSelf: 'flex-start',
-  },
-  ctaBtnText: { color: colors.primaryBlue, fontWeight: '900', fontSize: 14 },
-  ctaIconWrap: { position: 'absolute', right: -15, bottom: -15, opacity: 0.15 },
+  ctaCard: { borderRadius: 30, padding: 25, flexDirection: 'row', overflow: 'hidden' },
+  ctaContent: { flex: 1, zIndex: 1 },
+  ctaTitle: { fontSize: 20, fontWeight: '900', color: '#FFF' },
+  ctaDesc: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 8, marginBottom: 20 },
+  ctaBtn: { backgroundColor: '#FFF', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 15, alignSelf: 'flex-start' },
+  ctaBtnText: { color: colors.primaryBlue, fontWeight: '800', fontSize: 14 },
+  ctaIconWrap: { position: 'absolute', right: -20, bottom: -20 },
+  emptyCard: { padding: 40, alignItems: 'center', backgroundColor: '#FFF', borderRadius: 24, ...shadows.sm },
+  emptyTitle: { fontSize: 16, fontWeight: '800', color: '#64748B', marginTop: 10 }
 });

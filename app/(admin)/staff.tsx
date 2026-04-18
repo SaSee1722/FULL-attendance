@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Image, ActivityIndicator, Modal, Alert, FlatList, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +18,39 @@ export default function AdminStaffDirectory() {
   const [selectedDept, setSelectedDept] = useState('All Staff');
   const [departments, setDepartments] = useState<string[]>(['All Staff']);
   const [activeTab, setActiveTab] = useState<'staff' | 'hods'>('staff');
+  
+  // Management State
+  const [manageModal, setManageModal] = useState(false);
+  const [transferModal, setTransferModal] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState<any>(null);
+  const [transferLoading, setTransferLoading] = useState(false);
+  const [hasResponsibilities, setHasResponsibilities] = useState(false);
+  const [personActionsLoading, setPersonActionsLoading] = useState(false);
+
+  // Filtered list of people who can take over responsibilities
+  const filteredRecipients = useMemo(() => {
+    if (!selectedPerson) return [];
+    
+    // Always filter by same department
+    const sameDept = selectedPerson.department;
+    
+    if (activeTab === 'staff') {
+      // Show staff in same dept, prioritizing unassigned ones
+      return allStaff
+        .filter(p => p.id !== selectedPerson.id && p.department === sameDept)
+        .sort((a, b) => {
+          if (!a.assignedClass && b.assignedClass) return -1;
+          if (a.assignedClass && !b.assignedClass) return 1;
+          return 0;
+        });
+    } else {
+      // Transferring an HOD: Show other HODs in same dept
+      return hods.filter(p => 
+        p.id !== selectedPerson.id && 
+        p.department === sameDept
+      );
+    }
+  }, [allStaff, hods, selectedPerson, activeTab]);
 
   // Modern Reactive Filtering with useMemo to avoid state synchronization issues
   const filteredStaff = useMemo(() => {
@@ -51,18 +84,26 @@ export default function AdminStaffDirectory() {
         (payload) => {
           if (payload.eventType === 'UPDATE') {
             const updated = payload.new;
-            // Handle both legacy and modern role names
             const role = updated.role === 'dean' ? 'hod' : updated.role;
-            
             if (role === 'hod') {
               setHods(prev => prev.map(h => String(h.id) === String(updated.id) ? { ...h, ...updated } : h));
             } else if (role === 'staff') {
               setAllStaff(prev => prev.map(s => String(s.id) === String(updated.id) ? { ...s, ...updated } : s));
             }
-          } else if (payload.eventType === 'INSERT') {
+          } else {
             loadStaff(false);
           }
         }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'classes' },
+        () => loadStaff(false)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'managed_staff' },
+        () => loadStaff(false)
       )
       .subscribe();
 
@@ -98,10 +139,7 @@ export default function AdminStaffDirectory() {
 
   const handleApprove = async (id: string, name: string) => {
     try {
-      // Optimistic Update (Immediate feedback)
-      // Robust string comparison for IDs to handle potential type mismatches
       setHods(prev => prev.map(h => String(h.id) === String(id) ? { ...h, is_approved: true } : h));
-      
       await dataService.approveHOD(id);
       showAlert('Account Approved', `HOD ${name} has been approved successfully.`);
     } catch (error) {
@@ -109,6 +147,88 @@ export default function AdminStaffDirectory() {
       showAlert('Approval Failed', 'Something went wrong while approving the HOD.');
       loadStaff();
     }
+  };
+
+  const openManagement = async (person: any) => {
+    setSelectedPerson(person);
+    setManageModal(true);
+    setPersonActionsLoading(true);
+    try {
+      // Check if they have classes or managed staff
+      const classes = await dataService.getClassesByAdvisor(person.name, person.staffId || person.id);
+      setHasResponsibilities(classes.length > 0);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setPersonActionsLoading(false);
+    }
+  };
+
+  const requestDeletion = () => {
+    if (hasResponsibilities) {
+      showAlert('Cannot Delete', `${selectedPerson.name} still has active responsibilities. Please transfer ownership of their classes first.`);
+      return;
+    }
+
+    Alert.alert(
+      'Delete Account',
+      `Are you sure you want to delete ${selectedPerson.name}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const isManaged = !!selectedPerson.staffId;
+              await dataService.deleteStaffMember(selectedPerson.id, isManaged);
+              setManageModal(false);
+              showAlert('Deleted', 'Account has been removed.');
+              loadStaff();
+            } catch (e: any) {
+              showAlert('Error', e.message || 'Failed to delete account.');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleTransfer = async (target: any) => {
+    if (!selectedPerson || !target) return;
+    
+    Alert.alert(
+      'Confirm Transfer',
+      `Transfer all classes and responsibilities from ${selectedPerson.name} to ${target.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Transfer',
+          onPress: async () => {
+            try {
+              setTransferLoading(true);
+              await dataService.transferAllOwnership(
+                selectedPerson.staffId || selectedPerson.id,
+                selectedPerson.name,
+                target.staffId || target.id,
+                target.name
+              );
+              setTransferModal(false);
+              setManageModal(false);
+              showAlert('Success', `Ownership transferred to ${target.name} successfully.`);
+              loadStaff();
+            } catch (e: any) {
+              showAlert('Transfer Failed', e.message || 'Something went wrong.');
+            } finally {
+              setTransferLoading(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
 
@@ -230,15 +350,24 @@ export default function AdminStaffDirectory() {
                         </View>
                       </View>
                       
-                      {!staff.is_approved && activeTab === 'hods' && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        {!staff.is_approved && activeTab === 'hods' && (
+                          <TouchableOpacity 
+                            style={styles.approveButton} 
+                            onPress={() => handleApprove(staff.id, staff.name)}
+                          >
+                            <MaterialIcons name="check-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
+                            <Text style={styles.approveButtonText}>Approve</Text>
+                          </TouchableOpacity>
+                        )}
+                        
                         <TouchableOpacity 
-                          style={styles.approveButton} 
-                          onPress={() => handleApprove(staff.id, staff.name)}
+                          style={styles.actionIconButton}
+                          onPress={() => openManagement(staff)}
                         >
-                          <MaterialIcons name="check-circle" size={16} color="#FFF" style={{ marginRight: 4 }} />
-                          <Text style={styles.approveButtonText}>Approve</Text>
+                          <Ionicons name="ellipsis-vertical" size={20} color={colors.textTertiary} />
                         </TouchableOpacity>
-                      )}
+                      </View>
                     </View>
 
                     <View style={styles.divider} />
@@ -270,6 +399,137 @@ export default function AdminStaffDirectory() {
         </ScrollView>
 
       </LinearGradient>
+
+      {/* Management Modal */}
+      <Modal
+        visible={manageModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setManageModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity 
+            style={styles.modalDismiss} 
+            activeOpacity={1} 
+            onPress={() => setManageModal(false)} 
+          />
+          <View style={styles.manageCard}>
+            <View style={styles.manageHeader}>
+              <Text style={styles.manageTitle}>Manage Account</Text>
+              <Text style={styles.manageSubtitle}>{selectedPerson?.name}</Text>
+            </View>
+
+            <View style={styles.manageBody}>
+              {personActionsLoading ? (
+                <ActivityIndicator color={colors.admin} />
+              ) : (
+                <>
+                  <TouchableOpacity 
+                    style={styles.manageBtn}
+                    onPress={() => {
+                      setManageModal(false);
+                      setTransferModal(true);
+                    }}
+                  >
+                    <View style={[styles.manageIcon, { backgroundColor: '#EFF6FF' }]}>
+                      <MaterialIcons name="swap-horiz" size={24} color="#2563EB" />
+                    </View>
+                    <View style={styles.manageBtnInfo}>
+                      <Text style={styles.manageBtnTitle}>Transfer Ownership</Text>
+                      <Text style={styles.manageBtnDesc}>Move classes and staff to another person</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={[styles.manageBtn, { marginTop: spacing.md }]}
+                    onPress={requestDeletion}
+                  >
+                    <View style={[styles.manageIcon, { backgroundColor: '#FEF2F2' }]}>
+                      <MaterialIcons name="delete-outline" size={24} color="#EF4444" />
+                    </View>
+                    <View style={styles.manageBtnInfo}>
+                      <Text style={[styles.manageBtnTitle, { color: '#EF4444' }]}>Delete Account</Text>
+                      <Text style={styles.manageBtnDesc}>Permanently remove from system</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+
+            <TouchableOpacity 
+              style={styles.closeManageBtn}
+              onPress={() => setManageModal(false)}
+            >
+              <Text style={styles.closeManageText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Transfer Modal */}
+      <Modal
+        visible={transferModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.transferContainer}>
+          <View style={styles.transferHeader}>
+            <TouchableOpacity onPress={() => setTransferModal(false)}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={styles.transferTitle}>
+              {activeTab === 'staff' ? 'Transfer Classes' : 'Transfer HOD Duties'}
+            </Text>
+            <View style={{ width: 50 }} />
+          </View>
+
+          <View style={styles.transferInfo}>
+            <Text style={styles.transferInfoText}>
+              {activeTab === 'staff' 
+                ? `Select an unassigned advisor in ${selectedPerson?.department} to take over classes.`
+                : `Select another HOD in ${selectedPerson?.department} to manage their staff and records.`}
+            </Text>
+          </View>
+
+          <FlatList
+            data={filteredRecipients}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.transferList}
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                style={styles.recipientCard}
+                onPress={() => handleTransfer(item)}
+              >
+                <View style={styles.recipientInfo}>
+                  <Text style={styles.recipientName}>{item.name}</Text>
+                  <Text style={styles.recipientRole}>
+                    {item.role === 'hod' || item.role === 'dean' 
+                      ? 'HOD Member' 
+                      : item.assignedClass ? `Assigned to ${item.assignedClass}` : 'Available Advisor'}
+                  </Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={24} color={colors.textTertiary} />
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="shuffle" size={48} color={colors.textTertiary} />
+                <Text style={styles.emptyTitle}>No Available Recipients</Text>
+                <Text style={styles.emptyText}>There are no other staff members in this department to transfer to.</Text>
+              </View>
+            }
+          />
+          
+          {transferLoading && (
+            <View style={styles.transferOverlay}>
+              <ActivityIndicator size="large" color={colors.admin} />
+              <Text style={styles.transferLoadingText}>Transferring duties...</Text>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -438,5 +698,151 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     ...shadows.lg,
+  },
+  actionIconButton: {
+    padding: 8,
+    marginLeft: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalDismiss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  manageCard: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: spacing.xl,
+    paddingBottom: Platform.OS === 'ios' ? 40 : spacing.xl,
+  },
+  manageHeader: {
+    alignItems: 'center',
+    marginBottom: spacing.xl,
+  },
+  manageTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+  },
+  manageSubtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  manageBody: {
+    marginBottom: spacing.xl,
+  },
+  manageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 20,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  manageIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  manageBtnInfo: {
+    flex: 1,
+  },
+  manageBtnTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  manageBtnDesc: {
+    fontSize: 12,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
+  closeManageBtn: {
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  closeManageText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textTertiary,
+  },
+  transferContainer: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  transferHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.xl,
+    backgroundColor: '#FFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  cancelText: {
+    fontSize: 15,
+    color: colors.admin,
+    fontWeight: '600',
+  },
+  transferTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  transferInfo: {
+    padding: spacing.lg,
+    backgroundColor: '#EFF6FF',
+    margin: spacing.lg,
+    borderRadius: 12,
+  },
+  transferInfoText: {
+    fontSize: 13,
+    color: '#1E40AF',
+    lineHeight: 18,
+  },
+  transferList: {
+    paddingHorizontal: spacing.xl,
+  },
+  recipientCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    ...shadows.sm,
+  },
+  recipientInfo: {
+    flex: 1,
+  },
+  recipientName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  recipientRole: {
+    fontSize: 12,
+    color: colors.textTertiary,
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  transferOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  transferLoadingText: {
+    marginTop: spacing.md,
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.admin,
   },
 });

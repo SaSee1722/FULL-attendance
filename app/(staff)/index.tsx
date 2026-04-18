@@ -391,9 +391,9 @@ export default function StaffHome() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const firstName = user?.name?.split(' ')[0] || 'there';
 
-  // Today's attendance percentage — from the daily report (present / total)
+  // Today's attendance percentage — from the daily report ( (present + od) / total )
   const todayPct = dailyReport?.isSubmitted && dailyReport.total > 0
-    ? Math.round((dailyReport.present / dailyReport.total) * 100)
+    ? Math.round(((dailyReport.present + dailyReport.od) / dailyReport.total) * 100)
     : 0;
   const todayLabel = dailyReport?.isSubmitted ? 'TODAY' : 'NO DATA';
 

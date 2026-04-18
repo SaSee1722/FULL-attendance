@@ -43,8 +43,8 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   return (
     <View style={[styles.tabBarWrapper, { bottom: Math.max(insets.bottom, 20) }]}>
       <View style={styles.tabBarContainer}>
-        {state.routes.map((route, index) => {
-          const isFocused = state.index === index;
+        {state.routes.filter(r => ['index', 'reports', 'staff', 'profile'].includes(r.name)).map((route) => {
+          const isFocused = state.routes[state.index].key === route.key;
 
           const onPress = () => {
             const event = navigation.emit({
@@ -105,6 +105,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="reports" options={{ title: 'Reports' }} />
       <Tabs.Screen name="staff" options={{ title: 'Staff' }} />
       <Tabs.Screen name="profile" options={{ title: 'Settings' }} />
+      <Tabs.Screen name="department-report" options={{ href: null }} />
     </Tabs>
   );
 }

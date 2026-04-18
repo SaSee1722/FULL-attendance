@@ -96,3 +96,31 @@ DROP TRIGGER IF EXISTS on_attendance_change ON public.attendance_records;
 CREATE TRIGGER on_attendance_change 
 AFTER INSERT OR UPDATE OR DELETE ON public.attendance_records 
 FOR EACH ROW EXECUTE FUNCTION public.update_attendance_rates();
+
+
+-- ── ADMINISTRATIVE PERMISSIONS (RLS) ─────────────────────────────
+-- Run these to allow Admins to approve HOD accounts and manage all data
+
+-- Allow Admins to update profiles (needed for HOD approval)
+DROP POLICY IF EXISTS "Admins can update all profiles" ON public.profiles;
+CREATE POLICY "Admins can update all profiles" ON public.profiles FOR UPDATE USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+);
+
+-- Ensure Admins can see and manage all classes
+DROP POLICY IF EXISTS "Admins can manage all classes" ON public.classes;
+CREATE POLICY "Admins can manage all classes" ON public.classes FOR ALL USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+);
+
+-- Ensure Admins can see and manage all students
+DROP POLICY IF EXISTS "Admins can manage all students" ON public.students;
+CREATE POLICY "Admins can manage all students" ON public.students FOR ALL USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+);
+
+-- Ensure Admins can see and manage all attendance
+DROP POLICY IF EXISTS "Admins can manage all attendance" ON public.attendance_records;
+CREATE POLICY "Admins can manage all attendance" ON public.attendance_records FOR ALL USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+);

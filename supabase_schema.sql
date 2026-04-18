@@ -84,29 +84,36 @@ DROP POLICY IF EXISTS "Activity logs viewable by department" ON public.activity_
 -- Policies for Profiles
 CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Admins can update all profiles" ON public.profiles FOR UPDATE USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+);
 
 -- Policies for Classes
-CREATE POLICY "Classes viewable by relevant department staff/hod" 
+CREATE POLICY "Classes viewable by relevant department staff/hod/admin" 
 ON public.classes FOR SELECT 
 USING (
-  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod' 
-  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('hod', 'admin')
+  AND (role = 'admin' OR LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid())))
   OR 
   (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'staff' 
   AND (LOWER(advisor) = LOWER((SELECT name FROM public.profiles WHERE id = auth.uid())) OR LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid())))
 );
 
-CREATE POLICY "HODs can manage classes in their department" 
+CREATE POLICY "Admins and HODs can manage classes" 
 ON public.classes FOR ALL 
 USING (
-  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod' 
-  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR 
+  ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod' 
+  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid())))
 );
 
 -- Policies for Students
-CREATE POLICY "Students viewable by relevant staff/hod" 
+CREATE POLICY "Students viewable by relevant staff/hod/admin" 
 ON public.students FOR SELECT 
 USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR
   EXISTS (
     SELECT 1 FROM public.classes c
     JOIN public.profiles p ON p.id = auth.uid()
@@ -118,9 +125,11 @@ USING (
   )
 );
 
-CREATE POLICY "HODs can manage students" 
+CREATE POLICY "Admins and HODs can manage students" 
 ON public.students FOR ALL 
 USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR
   EXISTS (
     SELECT 1 FROM public.classes c
     JOIN public.profiles p ON p.id = auth.uid()
@@ -130,9 +139,11 @@ USING (
 );
 
 -- Policies for Attendance
-CREATE POLICY "Attendance records viewable by staff/hod" 
+CREATE POLICY "Attendance records viewable by staff/hod/admin" 
 ON public.attendance_records FOR SELECT 
 USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR
   EXISTS (
     SELECT 1 FROM public.classes c
     JOIN public.profiles p ON p.id = auth.uid()
@@ -144,9 +155,11 @@ USING (
   )
 );
 
-CREATE POLICY "Staff can mark attendance" 
+CREATE POLICY "Staff/HOD/Admin can manage attendance" 
 ON public.attendance_records FOR ALL 
 USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR
   EXISTS (
     SELECT 1 FROM public.classes c
     JOIN public.profiles p ON p.id = auth.uid()
@@ -159,23 +172,29 @@ USING (
 );
 
 -- Policies for Holidays
-CREATE POLICY "Holidays viewable by department" 
+CREATE POLICY "Holidays viewable by department or admin" 
 ON public.holidays FOR SELECT 
 USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR 
   LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
-CREATE POLICY "HODs can manage holidays" 
+CREATE POLICY "Admins and HODs can manage holidays" 
 ON public.holidays FOR ALL 
 USING (
-  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod'
-  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR
+  ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'hod'
+  AND LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid())))
 );
 
 -- Policies for Activity Logs
-CREATE POLICY "Activity logs viewable by department" 
+CREATE POLICY "Activity logs viewable by department or admin" 
 ON public.activity_logs FOR SELECT 
 USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+  OR
   LOWER(department) = LOWER((SELECT department FROM public.profiles WHERE id = auth.uid()))
 );
 
