@@ -268,7 +268,7 @@ export const dataService = {
       // Persist to AsyncStorage for offline fallback
       persistentCache.set(cacheKey, res).catch(() => {});
       return res;
-    } catch (_e) {
+    } catch {
       // Offline fallback: return stale persisted data
       const stale = await persistentCache.getStale(cacheKey);
       if (stale) {
@@ -344,7 +344,7 @@ export const dataService = {
       // Persist for offline
       persistentCache.set(cacheKey, result).catch(() => {});
       return result;
-    } catch (_e) {
+    } catch {
       // Offline fallback
       const stale = await persistentCache.getStale(cacheKey);
       if (stale) {
@@ -698,7 +698,7 @@ export const dataService = {
         persistentCache.set(cacheKey, result).catch(() => {});
       }
       return result;
-    } catch (_e) {
+    } catch {
       // Offline fallback
       const stale = await persistentCache.getStale(cacheKey);
       if (stale) {
