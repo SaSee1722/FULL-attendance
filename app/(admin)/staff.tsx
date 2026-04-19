@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { dataService } from '../../services/dataService';
 import { colors, typography, spacing, shadows } from '../../constants/theme';
-import { useAlert } from '@/template';
+import { useAlert } from '@/components/ui/alert';
 
 export default function AdminStaffDirectory() {
   const { showAlert } = useAlert();

@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { dataService, ClassData, Student } from '../../services/dataService';
-import { useAlert } from '@/template';
+import { useAlert } from '@/components/ui/alert';
 import { colors, typography, spacing, borderRadius, shadows } from '../../constants/theme';
 
 export default function ClassDetailScreen() {
