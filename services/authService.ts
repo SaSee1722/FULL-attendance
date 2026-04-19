@@ -232,27 +232,37 @@ export const authService = {
     // Update local storage
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(user));
     
-    // Update database
-    const profileUpdate = supabase
-      .from('profiles')
-      .update({ profile_image: finalUrl })
-      .eq('id', user.id);
-
-    // If it's a virtual account, also update managed_staff
-    const managedUpdate = user.isVirtual
-      ? supabase.from('managed_staff').update({ profile_image: finalUrl }).eq('id', user.id)
-      : Promise.resolve({ error: null });
-      
-    const [pRes, mRes] = await Promise.all([profileUpdate, managedUpdate]);
-      
-    if (pRes.error && !user.isVirtual) {
-      console.error('Failed to update DB profile image:', pRes.error);
-      throw pRes.error;
+    // Update database — profiles table (real Supabase auth accounts)
+    if (!user.isVirtual) {
+      const { error: pErr } = await supabase
+        .from('profiles')
+        .update({ profile_image: finalUrl })
+        .eq('id', user.id);
+      if (pErr) {
+        console.error('Failed to update profiles.profile_image:', pErr);
+        throw pErr;
+      }
     }
-    
-    if (mRes.error && user.isVirtual) {
-      console.error('Failed to update managed_staff profile image:', mRes.error);
-      throw mRes.error;
+
+    // Virtual (managed_staff) accounts — update managed_staff table.
+    // The profile_image column may not exist yet; if it doesn't, we skip
+    // the DB write gracefully — the image is still saved in AsyncStorage
+    // and the user sees it on their device immediately.
+    if (user.isVirtual) {
+      const { error: mErr } = await supabase
+        .from('managed_staff')
+        .update({ profile_image: finalUrl })
+        .eq('id', user.id);
+
+      if (mErr) {
+        // Column missing (schema cache error) — not a fatal error.
+        // The image is saved locally; run the SQL migration to persist globally.
+        console.warn(
+          '[AuthService] managed_staff.profile_image update skipped:',
+          mErr.message
+        );
+        // Don't throw — return the URL so the UI still updates
+      }
     }
 
     return finalUrl;

@@ -14,6 +14,7 @@ import { dataService } from '../../services/dataService';
 import { colors, spacing, shadows, gradients } from '../../constants/theme';
 import { format, startOfWeek, startOfMonth, isAfter, subDays } from 'date-fns';
 import { useAuth } from '../../hooks/useAuth';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 
 const { width } = Dimensions.get('window');
 
@@ -73,6 +74,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 export default function HODReports() {
   const insets = useSafeAreaInsets();
   const { user, loading: authLoading } = useAuth();
+  const { isOnline } = useNetworkStatus();
   const [period, setPeriod] = useState<Period>('Week');
   const [selectedDay, setSelectedDay] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [allLogs, setAllLogs] = useState<any[]>([]);
@@ -309,6 +311,14 @@ export default function HODReports() {
   }, [points, linePath]);
 
   const downloadReport = async () => {
+    if (!isOnline) {
+      Alert.alert(
+        '📡 Internet Required',
+        'PDF reports require an internet connection. Please connect to Wi-Fi or mobile data and try again.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
     try {
       setDownloading(true);
       const html = buildHTML(filteredLogs, period, stats);
@@ -325,6 +335,10 @@ export default function HODReports() {
   };
 
   const downloadClassReport = async (cls: typeof classReports[0]) => {
+    if (!isOnline) {
+      Alert.alert('📡 Internet Required', 'PDF reports require an internet connection.');
+      return;
+    }
     try {
       const html = buildHTML(filteredLogs.filter(l => l.className === cls.className), period, {
         totalClasses: 1, presentToday: cls.present, absentToday: cls.absent,

@@ -190,12 +190,18 @@ export default function HODManagement() {
   useEffect(() => {
     if (!authLoading && user) {
       fetchAll();
-      const subClasses = dataService.subscribeToTable('classes', fetchAll);
-      const subStudents = dataService.subscribeToTable('students', fetchAll);
-      
+      const subClasses  = dataService.subscribeToTable('classes',            fetchAll);
+      const subStudents = dataService.subscribeToTable('students',           fetchAll);
+      const subStaff    = dataService.subscribeToTable('managed_staff',      fetchAll);
+      const subProfiles = dataService.subscribeToTable('profiles',           fetchAll);
+      const subAtt      = dataService.subscribeToTable('attendance_records', fetchAll);
+
       return () => {
         subClasses?.unsubscribe();
         subStudents?.unsubscribe();
+        subStaff?.unsubscribe();
+        subProfiles?.unsubscribe();
+        subAtt?.unsubscribe();
       };
     }
   }, [fetchAll, authLoading, user]);

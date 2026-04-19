@@ -75,10 +75,9 @@ export default function StaffProfile() {
         const uploadedUrl = await authService.updateProfileImage(uri);
         setImageUri(uploadedUrl || uri);
         
-        // Clear classes cache so dashboard cards update
+        // Clear full cache so dashboard cards and profile avatar refresh
         const { dataService } = await import('../../services/dataService');
-        dataService.clearCachePrefix('classes_');
-        dataService.clearCachePrefix('profile_');
+        dataService.clearCache();
         
         if (refreshUser) await refreshUser();
       }

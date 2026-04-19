@@ -287,10 +287,12 @@ export default function StaffReports() {
 
   useFocusEffect(useCallback(() => {
     loadAll();
-    // Subscribe to realtime changes
+    // Subscribe to realtime changes across all relevant tables
     subsRef.current.forEach(s => s.unsubscribe());
     subsRef.current = [
       dataService.subscribeToTable('attendance_records', () => loadAll(true)),
+      dataService.subscribeToTable('classes',            () => loadAll(true)),
+      dataService.subscribeToTable('students',           () => loadAll(true)),
     ];
     return () => { subsRef.current.forEach(s => s.unsubscribe()); subsRef.current = []; };
   }, [loadAll]));

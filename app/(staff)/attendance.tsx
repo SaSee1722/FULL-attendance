@@ -10,6 +10,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { dataService, Student, ClassData } from '../../services/dataService';
 import { useAuth } from '../../hooks/useAuth';
 import { gradients, shadows, colors } from '../../constants/theme';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { offlineQueue } from '../../services/offlineQueue';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -111,6 +113,7 @@ export default function StaffAttendance() {
   const { user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { isOnline } = useNetworkStatus();
 
   const [selectedClass, setSelectedClass] = useState<ClassData | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -263,13 +266,29 @@ export default function StaffAttendance() {
         status: attendance[s.id] || 'present'
       }));
 
-      // markAttendance clears relevant caches. The SQL Trigger 'on_attendance_change'
+      if (!isOnline) {
+        // OFFLINE: queue records for later sync.
+        // We use `user.id` already in React state (loaded from AsyncStorage) — no network call needed.
+        const markedById = user?.id || '';
+        await offlineQueue.addRecords(
+          records.map(r => ({ ...r, markedBy: markedById }))
+        );
+        setLockedDates(prev => [...prev, date]);
+        // Reflect the queued marks locally
+        setSavedAttendance(attendance);
+        Alert.alert(
+          '📥 Saved Offline',
+          'Attendance saved locally. It will sync to the server automatically when you reconnect.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // ONLINE: markAttendance clears relevant caches. The SQL Trigger 'on_attendance_change'
       // handles the actual rate recomputation in the background.
       await dataService.markAttendance(records);
 
       // Lock the date and reload everything fresh from DB.
-      // loadClassAttendance fetches students (cache busted by recompute) so we
-      // get the correct updated attendance_rate without any manual delta math.
       setLockedDates(prev => [...prev, date]);
       await loadClassAttendance();
 
@@ -450,8 +469,14 @@ export default function StaffAttendance() {
       {/* Bottom Bar placeholder for spacing */}
       {!lockedDates.includes(date) && !isFutureDate && (
         <View style={s.bottomBar}>
+          {!isOnline && (
+            <View style={s.offlinePill}>
+              <Ionicons name="cloud-offline-outline" size={13} color="#F59E0B" />
+              <Text style={s.offlinePillTxt}>OFFLINE — will sync when online</Text>
+            </View>
+          )}
           <Pressable
-            style={[s.saveBtn, saving && { opacity: 0.7 }, isHoliday && { backgroundColor: '#10B981' }]}
+            style={[s.saveBtn, saving && { opacity: 0.7 }, isHoliday && { backgroundColor: '#10B981' }, !isOnline && s.saveBtnOffline]}
             onPress={saveAttendance}
             disabled={saving}
           >
@@ -459,8 +484,10 @@ export default function StaffAttendance() {
               <ActivityIndicator color="#FFF" />
             ) : (
               <>
-                <Ionicons name={isHoliday ? "checkmark-circle" : "person"} size={18} color="#FFF" />
-                <Text style={s.saveBtnTxt}>{isHoliday ? 'Finalize Holiday Attendance' : 'Submit Attendance'}</Text>
+                <Ionicons name={isHoliday ? 'checkmark-circle' : isOnline ? 'person' : 'cloud-offline-outline'} size={18} color="#FFF" />
+                <Text style={s.saveBtnTxt}>
+                  {isHoliday ? 'Finalize Holiday Attendance' : isOnline ? 'Submit Attendance' : 'Save Offline'}
+                </Text>
               </>
             )}
           </Pressable>
@@ -606,7 +633,15 @@ const s = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12,
     ...shadows.lg,
   },
+  saveBtnOffline: { backgroundColor: '#92400E' },
   saveBtnTxt: { color: '#FFF', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
+  offlinePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FEF3C7', borderColor: '#F59E0B', borderWidth: 1,
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6,
+    marginBottom: 8, alignSelf: 'center',
+  },
+  offlinePillTxt: { fontSize: 11, fontWeight: '800', color: '#92400E' },
 
   lockedBanner: {
     position: 'absolute', bottom: 110, alignSelf: 'center',

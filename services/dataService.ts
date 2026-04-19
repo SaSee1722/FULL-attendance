@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { colors } from '../constants/theme';
 import { authService } from './authService';
+import { persistentCache } from './offlineQueue';
 
 export interface Profile {
   id: string;
@@ -102,7 +103,11 @@ export const dataService = {
     try {
       // 1. Check local auth state first
       const localUser = await authService.getCurrentUser();
-      if (!localUser) return null;
+      if (!localUser) {
+        // No local auth — try stale persisted profile as last resort
+        const stale = await persistentCache.getStale(cacheKey);
+        return stale || null;
+      }
 
       // 2. If it's a virtual user, use a simulated profile
       if (localUser.isVirtual) {
@@ -117,25 +122,46 @@ export const dataService = {
           staff_id: localUser.staffId
         };
         setCache(cacheKey, virtualProfile, TTL.profile);
+        // Persist so it's available offline
+        persistentCache.set(cacheKey, virtualProfile).catch(() => {});
         return virtualProfile;
       }
 
-      // 3. Fallback to Supabase Profile for real accounts
-      const { data, error } = await supabase
+      // 3. Fallback to Supabase Profile — race against a 5s timeout so we fail fast offline
+      const timeout = new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error('timeout') }), 5000)
+      );
+      const fetchProfile = supabase
         .from('profiles')
         .select('*')
         .eq('id', localUser.id)
         .maybeSingle();
-      
-      if (error || !data) return null;
 
-      setCache(cacheKey, data, TTL.profile);
-      return {
-        ...data,
-        isApproved: data.is_approved
-      };
+      const { data, error } = await Promise.race([fetchProfile, timeout]);
+      
+      if (error || !data) {
+        // Network failed — return stale persisted profile
+        const stale = await persistentCache.getStale(cacheKey);
+        if (stale) {
+          setCache(cacheKey, stale, TTL.profile);
+          return stale;
+        }
+        return null;
+      }
+
+      const profile = { ...data, isApproved: data.is_approved };
+      setCache(cacheKey, profile, TTL.profile);
+      // Persist so it's available offline
+      persistentCache.set(cacheKey, profile).catch(() => {});
+      return profile;
     } catch (e) { 
       console.error('getCurrentProfile error:', e);
+      // Last resort: return stale persisted profile so offline flows don't break
+      const stale = await persistentCache.getStale(cacheKey);
+      if (stale) {
+        setCache(cacheKey, stale, TTL.profile);
+        return stale;
+      }
       return null; 
     }
   },
@@ -239,8 +265,18 @@ export const dataService = {
       });
 
       setCache(cacheKey, res, TTL.classes);
+      // Persist to AsyncStorage for offline fallback
+      persistentCache.set(cacheKey, res).catch(() => {});
       return res;
-    } catch { return []; }
+    } catch (e) {
+      // Offline fallback: return stale persisted data
+      const stale = await persistentCache.getStale(cacheKey);
+      if (stale) {
+        console.log('[DataService] getClasses: returning stale offline data');
+        return stale;
+      }
+      return [];
+    }
   },
 
 
@@ -305,8 +341,18 @@ export const dataService = {
         attendanceRate: s.attendance_rate != null ? s.attendance_rate : 100
       }));
       setCache(cacheKey, result, TTL.students);
+      // Persist for offline
+      persistentCache.set(cacheKey, result).catch(() => {});
       return result;
-    } catch { return []; }
+    } catch (e) {
+      // Offline fallback
+      const stale = await persistentCache.getStale(cacheKey);
+      if (stale) {
+        console.log('[DataService] getStudents: returning stale offline data for', classId);
+        return stale;
+      }
+      return [];
+    }
   },
 
   async getStudentsByClass(classId: string) {
@@ -477,14 +523,36 @@ export const dataService = {
   async deleteStaffMember(id: string, isManaged: boolean) {
     try {
       if (isManaged) {
-        const { error } = await supabase.from('managed_staff').delete().eq('id', id);
-        if (error) throw error;
+        // Virtual accounts: direct delete from managed_staff (permissive RLS)
+        const { error } = await supabase
+          .from('managed_staff')
+          .delete()
+          .eq('id', id);
+        if (error) {
+          console.error('managed_staff delete error:', error);
+          throw new Error(error.message || 'Could not delete staff account. Check RLS permissions.');
+        }
       } else {
-        const { error } = await supabase.from('profiles').delete().eq('id', id);
-        if (error) throw error;
+        // Real Supabase auth accounts: use RPC with SECURITY DEFINER to bypass RLS.
+        // The function `delete_profile_by_id` must exist in your Supabase database.
+        const { error } = await supabase.rpc('delete_profile_by_id', { target_id: id });
+        if (error) {
+          console.error('delete_profile_by_id RPC error:', error);
+          // Fallback: try direct delete (works if admin RLS policy exists)
+          const { error: directError } = await supabase
+            .from('profiles')
+            .delete()
+            .eq('id', id);
+          if (directError) {
+            throw new Error(
+              'Delete failed. This is likely an RLS permission issue. ' +
+              'Run the SQL migration in your Supabase dashboard to enable admin deletes.'
+            );
+          }
+        }
       }
       this.clearCache();
-    } catch (e) {
+    } catch (e: any) {
       console.error('deleteStaffMember error:', e);
       throw e;
     }
@@ -608,6 +676,7 @@ export const dataService = {
   },
 
   async getAttendance(classId: string, date: string): Promise<AttendanceRecord[]> {
+    const cacheKey = `attendance_rec_${classId}_${date}`;
     try {
       const { data } = await supabase
         .from('attendance_records')
@@ -615,7 +684,7 @@ export const dataService = {
         .eq('class_id', classId)
         .eq('date', date);
       
-      return (data || []).map(r => ({
+      const result = (data || []).map(r => ({
         id: r.id,
         studentId: r.student_id,
         classId: r.class_id,
@@ -624,7 +693,20 @@ export const dataService = {
         markedBy: r.marked_by,
         timestamp: r.timestamp
       }));
-    } catch { return []; }
+      // Persist for offline (24h max age)
+      if (result.length > 0) {
+        persistentCache.set(cacheKey, result).catch(() => {});
+      }
+      return result;
+    } catch (e) {
+      // Offline fallback
+      const stale = await persistentCache.getStale(cacheKey);
+      if (stale) {
+        console.log('[DataService] getAttendance: returning stale offline data');
+        return stale;
+      }
+      return [];
+    }
   },
 
   async markAttendance(records: Partial<AttendanceRecord>[]) {
