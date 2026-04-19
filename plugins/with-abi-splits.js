@@ -1,33 +1,49 @@
 /**
  * Custom Expo Config Plugin: Enable ABI Split APKs
  *
- * This plugin patches the generated android/app/build.gradle during EAS Build
- * to enable building separate APKs per CPU architecture:
- *   - arm64-v8a  (64-bit ARM – most modern Android phones)
- *   - armeabi-v7a (32-bit ARM – older devices)
- *   - x86_64     (64-bit x86 – emulators)
- *   - x86        (32-bit x86 – older emulators)
+ * When enabled, running assembleRelease produces multiple APKs:
+ *   app-arm64-v8a-release.apk   (modern phones)
+ *   app-armeabi-v7a-release.apk (older phones)
+ *   app-x86_64-release.apk      (emulators)
+ *   app-x86-release.apk         (old emulators)
  */
 const { withAppBuildGradle } = require('@expo/config-plugins');
 
 module.exports = function withAbiSplits(config) {
   return withAppBuildGradle(config, (config) => {
-    const contents = config.modResults.contents;
+    let contents = config.modResults.contents;
 
-    // Enable separate build per CPU architecture (default is false in Expo template)
+    // Pattern 1: Standard RN Groovy DSL template (most common)
     if (contents.includes('def enableSeparateBuildPerCPUArchitecture = false')) {
-      config.modResults.contents = contents.replace(
+      contents = contents.replace(
         'def enableSeparateBuildPerCPUArchitecture = false',
         'def enableSeparateBuildPerCPUArchitecture = true'
       );
-    } else if (contents.includes('enableSeparateBuildPerCPUArchitecture = false')) {
-      // Handle Kotlin DSL variant
-      config.modResults.contents = contents.replace(
-        'enableSeparateBuildPerCPUArchitecture = false',
+      console.log('[with-abi-splits] ✅ Enabled ABI splits (pattern 1)');
+    }
+    // Pattern 2: Regex fallback for any whitespace variation
+    else if (/enableSeparateBuildPerCPUArchitecture\s*=\s*false/.test(contents)) {
+      contents = contents.replace(
+        /enableSeparateBuildPerCPUArchitecture\s*=\s*false/,
         'enableSeparateBuildPerCPUArchitecture = true'
       );
+      console.log('[with-abi-splits] ✅ Enabled ABI splits (pattern 2)');
+    }
+    // Pattern 3: If the variable doesn't exist, inject it into the android block
+    else if (!contents.includes('enableSeparateBuildPerCPUArchitecture')) {
+      // Inject before the splits block if it exists
+      if (contents.includes('splits {')) {
+        contents = contents.replace(
+          'splits {',
+          'def enableSeparateBuildPerCPUArchitecture = true\n    splits {'
+        );
+        console.log('[with-abi-splits] ✅ Injected ABI splits variable');
+      } else {
+        console.log('[with-abi-splits] ⚠️ Could not find splits block - skipping');
+      }
     }
 
+    config.modResults.contents = contents;
     return config;
   });
 };
