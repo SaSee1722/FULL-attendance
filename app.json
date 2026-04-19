@@ -39,7 +39,8 @@
       "expo-web-browser",
       "@react-native-community/datetimepicker",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "./plugins/with-abi-splits"
     ],
     "experiments": {
       "typedRoutes": true
