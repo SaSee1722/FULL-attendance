@@ -268,7 +268,7 @@ export const dataService = {
       // Persist to AsyncStorage for offline fallback
       persistentCache.set(cacheKey, res).catch(() => {});
       return res;
-    } catch (e) {
+    } catch (_e) {
       // Offline fallback: return stale persisted data
       const stale = await persistentCache.getStale(cacheKey);
       if (stale) {
@@ -344,7 +344,7 @@ export const dataService = {
       // Persist for offline
       persistentCache.set(cacheKey, result).catch(() => {});
       return result;
-    } catch (e) {
+    } catch (_e) {
       // Offline fallback
       const stale = await persistentCache.getStale(cacheKey);
       if (stale) {
@@ -698,7 +698,7 @@ export const dataService = {
         persistentCache.set(cacheKey, result).catch(() => {});
       }
       return result;
-    } catch (e) {
+    } catch (_e) {
       // Offline fallback
       const stale = await persistentCache.getStale(cacheKey);
       if (stale) {
@@ -748,9 +748,9 @@ export const dataService = {
       // 3. Log activity asynchronously
       this.getCurrentProfile().then(p => {
         if (p && records.length > 0) {
-          const pCount = records.filter(r => r.status.toLowerCase() === 'present').length;
-          const aCount = records.filter(r => r.status.toLowerCase() === 'absent' || r.status.toLowerCase() === 'unapproved').length;
-          const odCount = records.filter(r => r.status.toLowerCase() === 'on-duty').length;
+          const pCount = records.filter(r => r.status?.toLowerCase() === 'present').length;
+          const aCount = records.filter(r => r.status?.toLowerCase() === 'absent' || r.status?.toLowerCase() === 'unapproved').length;
+          const odCount = records.filter(r => r.status?.toLowerCase() === 'on-duty').length;
           
           supabase.from('activity_logs').insert({
             type: 'attendance_marking',
