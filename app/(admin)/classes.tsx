@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, SafeAreaView, Platform, UIManager, Modal, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, SafeAreaView, Platform, UIManager, Modal, TouchableWithoutFeedback, Image } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -105,6 +105,13 @@ export default function ClassExplorer() {
                     activeOpacity={0.7}
                   >
                     <View style={styles.classMain}>
+                      <View style={styles.advisorImageContainer}>
+                        {cls.advisorImage ? (
+                          <Image source={{ uri: cls.advisorImage }} style={styles.advisorImageList} />
+                        ) : (
+                          <Ionicons name="person" size={16} color={colors.textTertiary} />
+                        )}
+                      </View>
                       <View style={styles.classInfo}>
                         <Text style={styles.className}>{cls.name}</Text>
                         <Text style={styles.classAdvisor}>Advisor: {cls.advisor || 'Not Assigned'}</Text>
@@ -144,9 +151,18 @@ export default function ClassExplorer() {
              
              <View style={styles.modalHeader}>
                 <View style={styles.modalHeaderTop}>
-                   <View style={{ flex: 1 }}>
-                      <Text style={styles.modalClassTitle}>{selectedClass?.name}</Text>
-                      <Text style={styles.modalAdvisorText}>Advisor: {selectedClass?.advisor || 'N/A'}</Text>
+                   <View style={styles.modalAdvisorRow}>
+                      <View style={styles.modalAdvisorImage}>
+                        {selectedClass?.advisorImage ? (
+                          <Image source={{ uri: selectedClass.advisorImage }} style={styles.fullImage} />
+                        ) : (
+                          <Ionicons name="person" size={24} color={colors.textTertiary} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.modalClassTitle}>{selectedClass?.name}</Text>
+                        <Text style={styles.modalAdvisorText}>Advisor: {selectedClass?.advisor || 'N/A'}</Text>
+                      </View>
                    </View>
                    <TouchableOpacity 
                      onPress={() => setSelectedClass(null)}
@@ -219,6 +235,31 @@ const styles = StyleSheet.create({
   classInfo: { flex: 1 },
   className: { fontSize: 16, fontWeight: '800', color: colors.textPrimary },
   classAdvisor: { fontSize: 11, color: colors.textTertiary, marginTop: 2, fontWeight: '600' },
+  advisorImageContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    overflow: 'hidden',
+  },
+  advisorImageList: {
+    width: '100%',
+    height: '100%',
+  },
+  modalAdvisorRow: { flexDirection: 'row', alignItems: 'center', gap: 15, flex: 1 },
+  modalAdvisorImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  fullImage: { width: '100%', height: '100%' },
   classRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   countPill: { backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   countText: { fontSize: 10, fontWeight: '800', color: colors.textSecondary },

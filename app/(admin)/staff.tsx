@@ -54,7 +54,10 @@ export default function AdminStaffDirectory() {
 
   // Modern Reactive Filtering with useMemo to avoid state synchronization issues
   const filteredStaff = useMemo(() => {
-    let base = activeTab === 'staff' ? allStaff : hods;
+    // For Advisors tab, we show "staff" role people + HODs who are actively assigned to a class
+    let base = activeTab === 'staff' 
+      ? allStaff.filter(s => s.role === 'staff' || s.assignedClass) 
+      : hods;
     let filtered = base;
     
     if (selectedDept !== 'All Staff') {

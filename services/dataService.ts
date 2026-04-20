@@ -251,6 +251,14 @@ export const dataService = {
 
       const res: ClassData[] = filtered.map((c: any) => {
         const cnt = counts[c.id];
+        let advisorImage = c.advisor ? imageMap[c.advisor.trim().toLowerCase()] : undefined;
+        
+        // Priority Fallback: If current user is the advisor and has an image set, use it
+        // This handles cases where DB might be slightly behind or schema differs
+        if (!advisorImage && profile && c.advisor === profile.name && profile.profile_image) {
+          advisorImage = profile.profile_image;
+        }
+
         return {
           id: c.id,
           name: c.name,
@@ -258,7 +266,7 @@ export const dataService = {
           year: c.year,
           section: c.section,
           advisor: c.advisor,
-          advisorImage: c.advisor ? imageMap[c.advisor.trim().toLowerCase()] : undefined,
+          advisorImage,
           studentCount: c.student_count || 0,
           attendanceRate: cnt && cnt.total > 0 ? Math.round((cnt.present / cnt.total) * 100) : (c.attendance_rate || 0),
         };
@@ -922,8 +930,9 @@ export const dataService = {
   },
 
   // ── Statistics ────────────────────────────────────────────────
-  async getStatistics(departmentId?: string) {
-    const cacheKey = departmentId ? `stats_${departmentId}` : 'stats';
+  async getStatistics(departmentId?: string, targetDate?: string) {
+    const today = targetDate || new Date().toISOString().split('T')[0];
+    const cacheKey = departmentId ? `stats-${departmentId}-${today}` : `stats-all-${today}`;
     const cached = getCached(cacheKey);
     if (cached) return cached;
 
@@ -974,7 +983,6 @@ export const dataService = {
         ? staffProfiles.filter(p => p.is_approved)
         : staffProfiles.filter(p => p.is_approved && this.matchesDepartment(p.department, targetDept));
       
-      const today = new Date().toISOString().split('T')[0];
       const { data: records, error: recError } = await supabase
         .from('attendance_records')
         .select('status, date, class_id')
@@ -1021,8 +1029,8 @@ export const dataService = {
     }
   },
 
-  async getAttendanceLogs(limit: number = 200, departmentId?: string) {
-    const logCacheKey = departmentId ? `logs-${limit}-${departmentId}` : `logs-${limit}`;
+  async getAttendanceLogs(limit: number = 200, departmentId?: string, date?: string) {
+    const logCacheKey = departmentId ? `logs-${limit}-${departmentId}-${date || ''}` : `logs-${limit}-${date || ''}`;
     const cached = getCached(logCacheKey);
     if (cached) return cached;
 
@@ -1033,6 +1041,10 @@ export const dataService = {
       let query = supabase
         .from('attendance_records')
         .select(`status, date, marked_by, timestamp, class_id`);
+
+      if (date) {
+        query = query.eq('date', date);
+      }
 
       const isHodOrDean = ['hod', 'dean', 'HOD', 'DEAN'].includes(profile.role);
       const targetDept = departmentId || (isHodOrDean ? profile.department : null);
@@ -1116,6 +1128,42 @@ export const dataService = {
       setCache(logCacheKey, res);
       return res;
     } catch { return []; }
+  },
+
+  async getAttendanceSessionNames(classId: string, date: string) {
+    try {
+      const { data, error } = await supabase
+        .from('attendance_records')
+        .select(`
+          status, 
+          student_id, 
+          students:student_id (name, roll_no)
+        `)
+        .eq('class_id', classId)
+        .eq('date', date)
+        .in('status', ['absent', 'unapproved', 'on-duty']);
+
+      if (error) throw error;
+
+      const result = {
+        absentApproved: [] as any[],
+        absentUnapproved: [] as any[],
+        onDuty: [] as any[]
+      };
+
+      (data || []).forEach((r: any) => {
+        const student = { name: r.students?.name || 'Unknown', rollNo: r.students?.roll_no || '—' };
+        const stat = (r.status || '').toLowerCase().trim();
+        if (stat === 'absent') result.absentApproved.push(student);
+        else if (stat === 'unapproved') result.absentUnapproved.push(student);
+        else if (stat === 'on-duty') result.onDuty.push(student);
+      });
+
+      return result;
+    } catch (e) {
+      console.error('getAttendanceSessionNames error:', e);
+      return { absentApproved: [], absentUnapproved: [], onDuty: [] };
+    }
   },
 
   // ── Rich Activity Logs with per-student details ───────────────────
@@ -1298,16 +1346,40 @@ export const dataService = {
         else if (stat === 'unapproved') { s.unapproved++; s.unapprovedStudents.push(studentInfo); }
       });
 
-      // Fetch advisor profile images
+      // Fetch advisor profile images from both sources
       const advisorNames = [...new Set(deptClasses.map(c => c.advisor).filter(Boolean))];
       if (advisorNames.length > 0) {
-        const { data: ads } = await supabase.from('profiles').select('name, profile_image').in('name', advisorNames);
+        const [profilesRes, managedRes] = await Promise.all([
+          supabase.from('profiles').select('name, profile_image').in('name', advisorNames.map(n => n.trim())),
+          supabase.from('managed_staff').select('name, profile_image').in('name', advisorNames.map(n => n.trim()))
+        ]);
+
         const imgMap: Record<string, string> = {};
-        ads?.forEach(ap => { if (ap.name && ap.profile_image) imgMap[ap.name.trim().toLowerCase()] = ap.profile_image; });
+        const timestamp = Date.now();
+        
+        profilesRes.data?.forEach(ap => {
+          if (ap.name && ap.profile_image) {
+            const url = ap.profile_image;
+            imgMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${timestamp}` : `${url}?v=${timestamp}`;
+          }
+        });
+        
+        managedRes.data?.forEach(ms => {
+          if (ms.name && ms.profile_image) {
+            const url = ms.profile_image;
+            imgMap[ms.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${timestamp}` : `${url}?v=${timestamp}`;
+          }
+        });
+
         deptClasses.forEach(c => {
           if (c.advisor) {
             const status = statusMap[c.id];
             status.advisorImage = imgMap[c.advisor.trim().toLowerCase()] || null;
+            
+            // Fallback for current user
+            if (!status.advisorImage && profile && c.advisor === profile.name && profile.profile_image) {
+               status.advisorImage = profile.profile_image;
+            }
           }
         });
       }
@@ -1557,9 +1629,9 @@ export const dataService = {
     } catch { return {}; }
   },
 
-  async getDepartmentSummary() {
+  async getDepartmentSummary(targetDate?: string) {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = targetDate || new Date().toISOString().split('T')[0];
       const [classesRes, hodsRes, recordsRes] = await Promise.all([
         supabase.from('classes').select('id, department, attendance_rate, student_count'),
         supabase.from('profiles').select('name, department').eq('role', 'hod'),
@@ -1632,9 +1704,9 @@ export const dataService = {
   async getStaffLiveStatus() {
     try {
       const [{ data: profiles }, { data: managed }, { data: classes }] = await Promise.all([
-        supabase.from('profiles').select('*').eq('role', 'staff'),
+        supabase.from('profiles').select('*').in('role', ['staff', 'hod', 'dean']),
         supabase.from('managed_staff').select('*'),
-        supabase.from('classes').select('id, advisor')
+        supabase.from('classes').select('id, advisor, name')
       ]);
 
       const today = new Date().toISOString().split('T')[0];
@@ -1645,7 +1717,7 @@ export const dataService = {
 
       const classByAdvisor: Record<string, string> = {};
       classes?.forEach(c => {
-        if (c.advisor) classByAdvisor[c.advisor.trim().toLowerCase()] = c.id;
+        if (c.advisor) classByAdvisor[c.advisor.trim().toLowerCase()] = c.name;
       });
 
       const allStaff = [...(profiles || [])];
@@ -1658,8 +1730,10 @@ export const dataService = {
             name: m.name,
             department: m.department,
             profile_image: m.profile_image,
-            role: 'staff'
+            role: 'staff' // Managed staff are always staff role
           });
+        } else if (!found.profile_image && m.profile_image) {
+          found.profile_image = m.profile_image;
         }
       });
 
@@ -1751,9 +1825,24 @@ export const dataService = {
         grouped[dept].push(c);
       });
 
+      // Fetch advisor images in parallel
+      const advisorNames = [...new Set(classes.map(c => c.advisor).filter(Boolean))];
+      const imageMap: Record<string, string> = {};
+      if (advisorNames.length > 0) {
+        const [{ data: ads }, { data: ms }] = await Promise.all([
+          supabase.from('profiles').select('name, profile_image').in('name', advisorNames),
+          supabase.from('managed_staff').select('name, profile_image').in('name', advisorNames)
+        ]);
+        ads?.forEach(ap => { if (ap.name && ap.profile_image) imageMap[ap.name.trim().toLowerCase()] = ap.profile_image; });
+        ms?.forEach(m => { if (m.name && m.profile_image) imageMap[m.name.trim().toLowerCase()] = m.profile_image; });
+      }
+
       return Object.entries(grouped).map(([dept, deptClasses]) => ({
         department: dept,
-        classes: deptClasses,
+        classes: deptClasses.map(c => ({
+          ...c,
+          advisorImage: c.advisor ? imageMap[c.advisor.trim().toLowerCase()] : null
+        })),
         totalStudents: deptClasses.reduce((acc, cls) => acc + cls.students.length, 0)
       }));
     } catch (e) {

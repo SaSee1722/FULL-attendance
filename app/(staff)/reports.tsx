@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable,
+  View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable, TouchableOpacity, Modal
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
@@ -8,8 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import Svg, { Circle, G, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import { useAuth } from '../../hooks/useAuth';
-import { dataService, ClassData } from '../../services/dataService';
-import { gradients } from '../../constants/theme';
+import dataService, { ClassData } from '../../services/dataService';
+import { colors as ThemeColors, typography, spacing, shadows, gradients } from '../../constants/theme';
 import { format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +207,12 @@ export default function StaffReports() {
     studentName: string; rollNo: string; status: string; date: string; className: string;
   }[]>([]);
   const [activeFilter, setActiveFilter] = useState<'all' | 'absent' | 'unapproved' | 'on-duty'>('all');
+  
+  // Modal state
+  const [selectedClassDetail, setSelectedClassDetail] = useState<any>(null);
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [sessionDetails, setSessionDetails] = useState<any>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   // Date range state
   const [startDate, setStartDate] = useState(() => toDateStr(subDays(new Date(), 6)));
@@ -284,6 +290,28 @@ export default function StaffReports() {
       setRefreshing(false);
     }
   }, [startDate, endDate, reportMode]);
+
+  const handleOpenClassDetails = async (cls: ClassData) => {
+    setSelectedClassDetail(cls);
+    setIsModalVisible(true);
+    setLoadingDetails(true);
+    try {
+      // In staff reports, we show details for the CURRENT selected range
+      const details = await dataService.getAttendanceDetailsByRange(startDate, endDate);
+      const classSpecific = details.filter(d => d.className === cls.name);
+      
+      const categorized = {
+        absentApproved: classSpecific.filter(d => d.status === 'absent').map(d => ({ name: d.studentName, rollNo: d.rollNo, date: d.date })),
+        absentUnapproved: classSpecific.filter(d => d.status === 'unapproved').map(d => ({ name: d.studentName, rollNo: d.rollNo, date: d.date })),
+        onDuty: classSpecific.filter(d => d.status === 'on-duty').map(d => ({ name: d.studentName, rollNo: d.rollNo, date: d.date }))
+      };
+      setSessionDetails(categorized);
+    } catch (e) {
+      console.error('Failed to load class details:', e);
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
 
   useFocusEffect(useCallback(() => {
     loadAll();
@@ -489,7 +517,11 @@ export default function StaffReports() {
               const hasRealData = classSummary[cls.id]?.total > 0;
 
               return (
-                <View key={cls.id} style={[r.classRow, i > 0 && r.borderTop]}>
+                <Pressable 
+                  key={cls.id} 
+                  style={({ pressed }) => [r.classRow, i > 0 && r.borderTop, pressed && { backgroundColor: '#F8FAFC' }]}
+                  onPress={() => handleOpenClassDetails(cls)}
+                >
                   <View style={r.classInfo}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <Text style={r.className}>{cls.name}</Text>
@@ -504,10 +536,13 @@ export default function StaffReports() {
                     </View>
                   </View>
                   <View style={{ alignItems: 'flex-end', minWidth: 60 }}>
-                    <Text style={[r.classRate, { color: rateColor }]}>{hasRealData ? `${rate}%` : '—'}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={[r.classRate, { color: rateColor }]}>{hasRealData ? `${rate}%` : '—'}</Text>
+                      <Ionicons name="chevron-forward" size={14} color={ThemeColors.textTertiary || '#94A3B8'} />
+                    </View>
                     <Text style={[r.classBadge, { color: rateColor }]}>{hasRealData ? lbl.text : 'PENDING'}</Text>
                   </View>
-                </View>
+                </Pressable>
               );
             })
           )}
@@ -637,6 +672,134 @@ export default function StaffReports() {
         </View>
 
       </ScrollView>
+
+      {/* Class Detail Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={isModalVisible}
+        onRequestClose={() => setIsModalVisible(false)}
+      >
+        <TouchableOpacity 
+          style={m.overlay} 
+          activeOpacity={1} 
+          onPress={() => setIsModalVisible(false)}
+        >
+          <View style={m.content}>
+            <View style={m.header}>
+              <View>
+                <Text style={m.title}>{selectedClassDetail?.name}</Text>
+                <Text style={m.subtitle}>{dateRangeLabel} • Manifest</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsModalVisible(false)} style={m.closeBtn}>
+                <Ionicons name="close" size={24} color="#1E293B" />
+              </TouchableOpacity>
+            </View>
+
+            {loadingDetails ? (
+              <View style={m.loading}>
+                <ActivityIndicator size="large" color="#4F46E5" />
+                <Text style={m.loadingTxt}>Analyzing attendance...</Text>
+              </View>
+            ) : (
+              <View style={{ flex: 1 }}>
+                <ScrollView 
+                  style={m.scroll} 
+                  contentContainerStyle={{ paddingBottom: 40 }}
+                  showsVerticalScrollIndicator={false}
+                >
+                {/* Statistics Summary */}
+                <View style={m.statsRow}>
+                  <View style={[m.sBox, { backgroundColor: '#FEF2F2' }]}>
+                    <Text style={[m.sVal, { color: '#DC2626' }]}>
+                      {(sessionDetails?.absentApproved?.length || 0) + (sessionDetails?.absentUnapproved?.length || 0)}
+                    </Text>
+                    <Text style={m.sLbl}>Absent</Text>
+                  </View>
+                  <View style={[m.sBox, { backgroundColor: '#EEF2FF' }]}>
+                    <Text style={[m.sVal, { color: '#4F46E5' }]}>
+                      {sessionDetails?.onDuty?.length || 0}
+                    </Text>
+                    <Text style={m.sLbl}>On Duty</Text>
+                  </View>
+                </View>
+
+                {/* Section List */}
+                {sessionDetails?.absentUnapproved?.length > 0 && (
+                  <View style={m.sec}>
+                    <View style={m.secHeader}>
+                      <View style={[m.dot, { backgroundColor: '#DC2626' }]} />
+                      <Text style={m.secTitle}>Absent (Unapproved)</Text>
+                    </View>
+                    {sessionDetails.absentUnapproved.map((s: any, i: number) => (
+                      <View key={i} style={m.row}>
+                        <View style={m.avatar}>
+                          <Text style={m.avatarTxt}>{s.name.charAt(0)}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={m.name}>{s.name}</Text>
+                          <Text style={m.meta}>{s.rollNo} • {format(new Date(s.date), 'MMM dd')}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {sessionDetails?.absentApproved?.length > 0 && (
+                  <View style={m.sec}>
+                    <View style={m.secHeader}>
+                      <View style={[m.dot, { backgroundColor: '#F59E0B' }]} />
+                      <Text style={m.secTitle}>Absent (Approved)</Text>
+                    </View>
+                    {sessionDetails.absentApproved.map((s: any, i: number) => (
+                      <View key={i} style={m.row}>
+                        <View style={m.avatar}>
+                          <Text style={m.avatarTxt}>{s.name.charAt(0)}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={m.name}>{s.name}</Text>
+                          <Text style={m.meta}>{s.rollNo} • {format(new Date(s.date), 'MMM dd')}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {sessionDetails?.onDuty?.length > 0 && (
+                  <View style={m.sec}>
+                    <View style={m.secHeader}>
+                      <View style={[m.dot, { backgroundColor: '#4F46E5' }]} />
+                      <Text style={m.secTitle}>On Duty (OD)</Text>
+                    </View>
+                    {sessionDetails.onDuty.map((s: any, i: number) => (
+                      <View key={i} style={m.row}>
+                        <View style={m.avatar}>
+                          <Text style={m.avatarTxt}>{s.name.charAt(0)}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={m.name}>{s.name}</Text>
+                          <Text style={m.meta}>{s.rollNo} • {format(new Date(s.date), 'MMM dd')}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {(!sessionDetails || (sessionDetails.absentApproved.length === 0 && sessionDetails.absentUnapproved.length === 0 && sessionDetails.onDuty.length === 0)) && (
+                   <View style={m.empty}>
+                     <Ionicons name="checkmark-circle" size={48} color="#10B981" />
+                     <Text style={m.emptyTitle}>Full Attendance</Text>
+                     <Text style={m.emptySub}>No student absences or OD records found for this class in the selected period.</Text>
+                   </View>
+                )}
+                
+                <View style={{ height: 40 }} />
+                </ScrollView>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -783,7 +946,33 @@ const r = StyleSheet.create({
     paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10,
   },
   statusBadgeTxt: { fontSize: 11, fontWeight: '800' },
+});
 
-  statusBadgeTxt: { fontSize: 11, fontWeight: '800' },
+const m = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.4)', justifyContent: 'flex-end' },
+  content: { backgroundColor: '#FFF', borderTopLeftRadius: 32, borderTopRightRadius: 32, height: '85%' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 24, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  title: { fontSize: 20, fontWeight: '900', color: '#1E293B' },
+  subtitle: { fontSize: 11, color: '#94A3B8', fontWeight: '700', marginTop: 4, letterSpacing: 0.5 },
+  closeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F8FAFC', alignItems: 'center', justifyContent: 'center' },
+  loading: { padding: 60, alignItems: 'center', gap: 12 },
+  loadingTxt: { fontSize: 11, color: '#94A3B8', fontWeight: '700' },
+  scroll: { flex: 1, paddingHorizontal: 24, paddingTop: 12 },
+  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 28 },
+  sBox: { flex: 1, padding: 16, borderRadius: 20, alignItems: 'center' },
+  sVal: { fontSize: 26, fontWeight: '900' },
+  sLbl: { fontSize: 10, fontWeight: '800', opacity: 0.5, marginTop: 4, textTransform: 'uppercase' },
+  sec: { marginBottom: 28 },
+  secHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  dot: { width: 10, height: 10, borderRadius: 3 },
+  secTitle: { fontSize: 13, fontWeight: '800', color: '#1E293B', textTransform: 'uppercase', letterSpacing: 0.5 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F8FAFC' },
+  avatar: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
+  avatarTxt: { fontSize: 12, fontWeight: '900', color: '#4F46E5' },
+  name: { fontSize: 13, fontWeight: '700', color: '#1E293B' },
+  meta: { fontSize: 10, color: '#94A3B8', fontWeight: '600', marginTop: 1 },
+  empty: { alignItems: 'center', paddingVertical: 40, gap: 12 },
+  emptyTitle: { fontSize: 16, fontWeight: '900', color: '#1E293B' },
+  emptySub: { fontSize: 12, color: '#94A3B8', textAlign: 'center', lineHeight: 18, paddingHorizontal: 20 },
 });
 
