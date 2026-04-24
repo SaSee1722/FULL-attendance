@@ -37,6 +37,22 @@ export default function ClassExplorer() {
     setLoading(false);
   };
 
+  const handleToggleIntern = async (studentId: string, currentStatus: boolean) => {
+    try {
+      await dataService.togglePermanentIntern(studentId, !currentStatus);
+      // Optimistic update local state for the modal
+      if (selectedClass) {
+        const updatedStudents = selectedClass.students.map((s: any) => 
+          s.id === studentId ? { ...s, is_intern: !currentStatus } : s
+        );
+        setSelectedClass({ ...selectedClass, students: updatedStudents });
+      }
+      loadData();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update student status');
+    }
+  };
+
 
   if (loading) {
     return (
@@ -189,6 +205,20 @@ export default function ClassExplorer() {
                              <Text style={styles.modalStudentName} numberOfLines={1}>{s.name}</Text>
                              <Text style={styles.studentId}>Reg No: {s.roll_no || s.enrollment_no || 'N/A'}</Text>
                           </View>
+                          <TouchableOpacity 
+                            onPress={() => handleToggleIntern(s.id, !!s.is_intern)}
+                            style={[styles.internToggle, s.is_intern && styles.internActive]}
+                          >
+                             <FontAwesome5 
+                               name="briefcase" 
+                               size={10} 
+                               color={s.is_intern ? '#FFF' : '#8B5CF6'} 
+                               style={{ marginRight: 4 }}
+                             />
+                             <Text style={[styles.internToggleTxt, s.is_intern && styles.internActiveTxt]}>
+                               {s.is_intern ? 'INTERN' : 'MARK'}
+                             </Text>
+                          </TouchableOpacity>
                         </View>
                       ))
                     ) : (
@@ -298,5 +328,27 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 100 },
   emptyTitle: { fontSize: 18, fontWeight: '900', color: colors.textPrimary, marginTop: 20 },
   emptyDesc: { fontSize: 13, color: colors.textTertiary, marginTop: 8, textAlign: 'center' },
-  noStudentsText: { fontSize: 13, fontStyle: 'italic', color: colors.textTertiary, textAlign: 'center', marginTop: 20 }
+  noStudentsText: { fontSize: 13, fontStyle: 'italic', color: colors.textTertiary, textAlign: 'center', marginTop: 20 },
+  internToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: '#E9E3FF',
+  },
+  internActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#7C3AED',
+  },
+  internToggleTxt: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#8B5CF6',
+  },
+  internActiveTxt: {
+    color: '#FFF',
+  }
 });

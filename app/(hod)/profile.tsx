@@ -9,15 +9,15 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { 
-  User, Mail, School, BadgeCheck, Settings, 
-  LogOut, Camera, Edit3, ChevronRight,
-  Bell, Shield, HelpCircle, Info
+  User, Mail, School, BadgeCheck, 
+  LogOut, Camera, Edit3, Info
 } from 'lucide-react-native';
 import { useAuth } from '../../hooks/useAuth';
 import { authService } from '../../services/authService';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, shadows, gradients } from '../../constants/theme';
 import { useRouter } from 'expo-router';
+import { dataService } from '../../services/dataService';
 
 export default function HODProfile() {
   const insets = useSafeAreaInsets();
@@ -72,6 +72,10 @@ export default function HODProfile() {
         const uploadedUrl = await authService.updateProfileImage(uri);
         setImageUri(uploadedUrl || uri);
         if (refreshUser) await refreshUser();
+        
+        // Clear caches to force refresh of advisor images everywhere
+        dataService.clearCache();
+        Alert.alert('Success', 'Profile image updated successfully');
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to update image.');
@@ -200,32 +204,6 @@ export default function HODProfile() {
           ))}
         </Animated.View>
 
-        {/* ── Settings ── */}
-        <Animated.View entering={FadeInDown.delay(700).duration(800)} style={[styles.section, shadows.sm]}>
-          <View style={styles.secHeader}>
-            <View style={styles.secTitleRow}>
-              <Settings size={18} color={colors.primaryBlue} />
-              <Text style={styles.secTitle}>Settings</Text>
-            </View>
-          </View>
-          {[
-            { icon: Bell, label: 'Notifications', sub: 'Attendance alerts & reminders' },
-            { icon: Shield, label: 'Privacy & Security', sub: 'Password and account security' },
-            { icon: HelpCircle, label: 'Help & Support', sub: 'Contact support team' },
-          ].map((item, i, arr) => (
-            <Pressable key={item.label}
-              style={[styles.settingRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}>
-              <View style={[styles.settingIcon, { backgroundColor: `${colors.primaryBlue}10` }]}>
-                <item.icon size={20} color={colors.primaryBlue} />
-              </View>
-              <View style={styles.settingText}>
-                <Text style={styles.settingLabel}>{item.label}</Text>
-                <Text style={styles.settingSub}>{item.sub}</Text>
-              </View>
-              <ChevronRight size={18} color="#CBD5E1" />
-            </Pressable>
-          ))}
-        </Animated.View>
 
         {/* ── Logout ── */}
         <Animated.View entering={FadeInDown.delay(800).duration(800)}>
@@ -380,16 +358,6 @@ const styles = StyleSheet.create({
   detailLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
   detailValue: { fontSize: 14, color: '#1E293B', fontWeight: '800' },
 
-  // Setting Row
-  settingRow: {
-    flexDirection: 'row', alignItems: 'center',
-    padding: 16, marginHorizontal: 12, borderRadius: 20,
-    marginBottom: 8, backgroundColor: '#F8FAFC',
-  },
-  settingIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  settingText: { flex: 1 },
-  settingLabel: { fontSize: 15, fontWeight: '800', color: '#1E293B' },
-  settingSub: { fontSize: 12, color: '#94A3B8', marginTop: 2, fontWeight: '500' },
 
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12,

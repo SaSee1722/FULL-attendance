@@ -117,9 +117,9 @@ export default function StaffAttendance() {
 
   const [selectedClass, setSelectedClass] = useState<ClassData | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, 'present'|'absent'|'on-duty'|'unapproved'>>({});
+  const [attendance, setAttendance] = useState<Record<string, 'present'|'absent'|'on-duty'|'unapproved'|'intern'>>({});
   // Snapshot of what was last saved to DB (to compute live preview delta)
-  const [savedAttendance, setSavedAttendance] = useState<Record<string, 'present'|'absent'|'on-duty'|'unapproved'>>({});
+  const [savedAttendance, setSavedAttendance] = useState<Record<string, 'present'|'absent'|'on-duty'|'unapproved'|'intern'>>({});
   const [lockedDates, setLockedDates] = useState<string[]>([]);
   const [holidays, setHolidays] = useState<string[]>([]);
   
@@ -177,9 +177,16 @@ export default function StaffAttendance() {
       setStudents(allStudents);
       
       const marked: Record<string, any> = {};
-      records.forEach(r => {
-        marked[r.studentId] = r.status;
-      });
+      if (records.length > 0) {
+        records.forEach(r => {
+          marked[r.studentId] = r.status;
+        });
+      } else {
+        // Fallback: Check for permanent interns if no attendance records exist for this date yet
+        allStudents.forEach(s => {
+          if (s.isIntern) marked[s.id] = 'intern';
+        });
+      }
       setAttendance(marked);
       setSavedAttendance(marked); // snapshot for live preview delta
 
@@ -217,7 +224,11 @@ export default function StaffAttendance() {
     };
   }, [selectedClass, loadClassAttendance, loadData]);
 
-  const toggleAttendance = (studentId: string, status: 'present'|'absent'|'on-duty'|'unapproved') => {
+  const toggleAttendance = (studentId: string, status: 'present'|'absent'|'on-duty'|'unapproved'|'intern') => {
+    // 0. PREVENT EDITING for Permanent Interns
+    const targetStudent = students.find(s => s.id === studentId);
+    if (targetStudent?.isIntern) return;
+
     // PREVENT ALL EDITING if the attendance is already finalized (submitted)
     if (lockedDates.includes(date)) {
       Alert.alert('Attendance Finalized', 'This attendance has already been submitted and cannot be edited.');
@@ -399,7 +410,15 @@ export default function StaffAttendance() {
                 <View style={s.studentHeader}>
                   <View style={s.nameBlock}>
                     <Text style={s.studentName}>{student.name}</Text>
-                    <Text style={s.rollNo}>ROLL: {student.rollNo}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                       <Text style={s.rollNo}>ROLL: {student.rollNo}</Text>
+                       {student.isIntern && (
+                         <View style={s.internBadge}>
+                           <Ionicons name="briefcase" size={10} color="#8B5CF6" />
+                           <Text style={s.internBadgeTxt}>INTERNSHIP</Text>
+                         </View>
+                       )}
+                    </View>
                   </View>
                   {/* Live attendance percentage — updates instantly on toggle */}
                   <View style={s.statsBlock}>
@@ -416,10 +435,10 @@ export default function StaffAttendance() {
                   </View>
                 </View>
 
-                <View style={[s.statusGrid, (isLocked || isHoliday) && { opacity: 0.6 }]}>
+                <View style={[s.statusGrid, (isLocked || isHoliday || student.isIntern) && { opacity: 0.6 }]}>
                   <Pressable
                     onPress={() => toggleAttendance(student.id, 'present')}
-                    disabled={isLocked || isHoliday}
+                    disabled={isLocked || isHoliday || student.isIntern}
                     style={[s.statusTab, status === 'present' && s.tabPresent]}
                   >
                     <Text style={[s.tabTxt, status === 'present' && s.tabTxtActive]}>P</Text>
@@ -427,7 +446,7 @@ export default function StaffAttendance() {
                   
                   <Pressable
                     onPress={() => toggleAttendance(student.id, 'absent')}
-                    disabled={isLocked || isHoliday}
+                    disabled={isLocked || isHoliday || student.isIntern}
                     style={[s.statusTab, (status === 'absent' || status === 'unapproved') && s.tabAbsent]}
                   >
                     <Text style={[s.tabTxt, (status === 'absent' || status === 'unapproved') && s.tabTxtActive]}>A</Text>
@@ -435,10 +454,18 @@ export default function StaffAttendance() {
 
                   <Pressable
                     onPress={() => toggleAttendance(student.id, 'on-duty')}
-                    disabled={isLocked || isHoliday}
+                    disabled={isLocked || isHoliday || student.isIntern}
                     style={[s.statusTab, status === 'on-duty' && s.tabOD]}
                   >
                     <Text style={[s.tabTxt, status === 'on-duty' && s.tabTxtActive]}>OD</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => toggleAttendance(student.id, 'intern')}
+                    disabled={isLocked || isHoliday || student.isIntern}
+                    style={[s.statusTab, (status === 'intern' || student.isIntern) && s.tabIntern]}
+                  >
+                    <Text style={[s.tabTxt, (status === 'intern' || student.isIntern) && s.tabTxtActive]}>I</Text>
                   </Pressable>
                 </View>
 
@@ -583,24 +610,43 @@ const s = StyleSheet.create({
   // Student Cards
   list: { paddingHorizontal: 16, paddingBottom: 100 },
   studentCard: {
-    backgroundColor: '#FFF', padding: 16, borderRadius: 24, marginBottom: 16,
+    backgroundColor: '#FFF', padding: 12, borderRadius: 18, marginBottom: 10,
     ...shadows.sm, borderWidth: 1, borderColor: '#F1F5F9',
   },
-  studentHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  studentHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
   nameBlock: { flex: 1 },
-  studentName: { fontSize: 16, fontWeight: '700', color: '#1E293B' },
+  studentName: { fontSize: 15, fontWeight: '700', color: '#1E293B' },
   rollNo: { fontSize: 12, color: '#94A3B8', fontWeight: '600', marginTop: 2 },
+  internBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F5F3FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginTop: 2,
+    borderWidth: 1,
+    borderColor: '#E9E3FF',
+  },
+  internBadgeTxt: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#8B5CF6',
+    letterSpacing: 0.5,
+  },
 
   statsBlock: { alignItems: 'flex-end' },
-  percentageTxt: { fontSize: 18, fontWeight: '900' },
+  percentageTxt: { fontSize: 16, fontWeight: '900' },
   statsLabel: { fontSize: 8, fontWeight: '800', color: '#94A3B8', letterSpacing: 1 },
 
-  statusGrid: { flexDirection: 'row', gap: 10 },
-  statusTab: { flex: 1, height: 42, borderRadius: 12, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  statusGrid: { flexDirection: 'row', gap: 8 },
+  statusTab: { flex: 1, height: 36, borderRadius: 10, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   tabPresent: { backgroundColor: '#10B981' },
   tabAbsent: { backgroundColor: '#EF4444' },
-  tabOD: { backgroundColor: '#2563EB' },
-  tabTxt: { fontSize: 14, fontWeight: '900', color: '#94A3B8' },
+  tabOD: { backgroundColor: '#3B82F6' },
+  tabIntern: { backgroundColor: '#8B5CF6' },
+  tabTxt: { fontSize: 13, fontWeight: '800', color: '#64748B' },
   tabTxtActive: { color: '#FFF' },
 
   absentActions: { flexDirection: 'row', gap: 10, marginTop: 12 },

@@ -451,7 +451,7 @@ export default function HODManagement() {
     } catch (e: any) { Alert.alert('Error', e?.message || 'Failed.'); }
     finally { setSubmitting(false); }
   };
-  const deleteStu = (classId: string, s: Student) => {
+      const deleteStu = (classId: string, s: Student) => {
     Alert.alert('Remove Student', `Remove "${s.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
@@ -461,6 +461,19 @@ export default function HODManagement() {
           } catch (e: any) { Alert.alert('Error', e?.message || 'Failed.'); }
       }},
     ]);
+  };
+
+  const handleToggleIntern = async (classId: string, studentId: string, currentStatus: boolean) => {
+    try {
+      await dataService.togglePermanentIntern(studentId, !currentStatus);
+      // Optimistic update
+      setStudents(p => ({
+        ...p,
+        [classId]: (p[classId] || []).map(s => s.id === studentId ? { ...s, isIntern: !currentStatus } : s)
+      }));
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update student status');
+    }
   };
 
   // ─── RENDER ───────────────────────────────────────────────
@@ -670,6 +683,12 @@ export default function HODManagement() {
                                         <Text style={[s.stRateV, { color: stColor }]}>{stRate}</Text>
                                         <Text style={[s.stRateS, { color: stColor }]}>%</Text>
                                       </View>
+                                      <Pressable 
+                                        onPress={() => handleToggleIntern(cls.id, st.id, !!st.isIntern)}
+                                        style={[s.miniInternToggle, st.isIntern && s.miniInternActive]}
+                                      >
+                                        <MaterialIcons name="business-center" size={14} color={st.isIntern ? '#FFF' : '#8B5CF6'} />
+                                      </Pressable>
                                       <Pressable onPress={() => openEditStu(cls.id, st)} style={s.iconBtn}>
                                         <MaterialIcons name="edit" size={15} color="#64748B" />
                                       </Pressable>
@@ -1658,6 +1677,22 @@ const s = StyleSheet.create({
     letterSpacing: 0.8, marginBottom: 6, textTransform: 'uppercase',
   },
   credInlineNoPass: { fontSize: 12, color: '#94A3B8', fontStyle: 'italic' },
+  miniInternToggle: {
+    padding: 2,
+    borderRadius: 8,
+    backgroundColor: '#F5F3FF',
+    borderWidth: 1,
+    borderColor: '#E9E3FF',
+    marginRight: 8,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniInternActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#7C3AED',
+  },
 });
 
 // ── Wizard Styles ─────────────────────────────────────────

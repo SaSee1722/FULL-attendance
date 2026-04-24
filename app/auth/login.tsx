@@ -101,8 +101,8 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <View style={styles.iconBox}>
             <Image 
-              source={require('../../assets/images/logo.png')} 
-              style={{ width: 60, height: 60 }} 
+              source={require('../../assets/images/applogo.png')} 
+              style={{ width: 60, height: 60, transform: [{ translateX: 3 }] }} 
               resizeMode="contain" 
             />
           </View>

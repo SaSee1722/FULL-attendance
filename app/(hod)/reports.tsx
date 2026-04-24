@@ -51,9 +51,9 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
     <div class="stat-box"><div class="stat-val">${stats.absentToday}</div><div class="stat-lbl">Absent Today</div></div>
   </div>
   <table>
-    <tr><th>Class</th><th>Date</th><th>Marked By</th><th>Present</th><th>Absent</th><th>On Duty</th><th>Rate</th></tr>
+    <tr><th>Class</th><th>Date</th><th>Marked By</th><th>Present</th><th>Absent</th><th>OD</th><th>Intern</th><th>Rate</th></tr>
     ${logs.map(l => {
-      const r = l.total > 0 ? Math.round(((l.present + l.onDuty) / l.total) * 100) : 0;
+      const r = l.total > 0 ? Math.round(((l.present + l.onDuty + (l.intern || 0)) / l.total) * 100) : 0;
       return `<tr>
         <td>${l.className}</td>
         <td>${l.date}</td>
@@ -61,6 +61,7 @@ const buildHTML = (logs: any[], period: string, stats: any) => `
         <td class="good">${l.present}</td>
         <td class="bad">${l.absent}</td>
         <td>${l.onDuty}</td>
+        <td>${l.intern || 0}</td>
         <td class="${r >= 75 ? 'good' : 'bad'}">${r}%</td>
       </tr>`;
     }).join('')}
@@ -144,20 +145,22 @@ export default function HODReports() {
     p: s.p + (l.present || 0),
     a: s.a + (l.absent || 0),
     o: s.o + (l.onDuty || 0),
-    tot: s.tot + (l.totalStudents || (l.present + l.absent + (l.onDuty || 0))),
+    i: s.i + (l.intern || 0),
+    tot: s.tot + (l.totalStudents || (l.present + l.absent + (l.onDuty || 0) + (l.intern || 0))),
     sess: s.sess + 1
-  }), { p: 0, a: 0, o: 0, tot: 0, sess: 0 }), [filteredLogs]);
+  }), { p: 0, a: 0, o: 0, i: 0, tot: 0, sess: 0 }), [filteredLogs]);
 
   const periodGrandRate = useMemo(() => periodTotals.tot > 0
-    ? Math.round(((periodTotals.p + periodTotals.o) / periodTotals.tot) * 100) : 0, [periodTotals]);
+    ? Math.round(((periodTotals.p + periodTotals.o + periodTotals.i) / periodTotals.tot) * 100) : 0, [periodTotals]);
 
   const dayTotals = useMemo(() => focusLogs.reduce((s, l) => ({
     p: s.p + (l.present || 0),
     a: s.a + (l.absent || 0),
     o: s.o + (l.onDuty || 0),
-    tot: s.tot + (l.totalStudents || (l.present + l.absent + (l.onDuty || 0))),
+    i: s.i + (l.intern || 0),
+    tot: s.tot + (l.totalStudents || (l.present + l.absent + (l.onDuty || 0) + (l.intern || 0))),
     sess: s.sess + 1
-  }), { p: 0, a: 0, o: 0, tot: 0, sess: 0 }), [focusLogs]);
+  }), { p: 0, a: 0, o: 0, i: 0, tot: 0, sess: 0 }), [focusLogs]);
 
 
   // Calculate marking completion
@@ -165,6 +168,27 @@ export default function HODReports() {
     if (stats.totalClasses === 0) return 0;
     return Math.round((dayTotals.sess / stats.totalClasses) * 100);
   }, [dayTotals.sess, stats.totalClasses]);
+
+  const displayStats = useMemo(() => {
+    // If the selected day has data, prioritize it for the header
+    if (dayTotals.sess > 0) {
+      return {
+        rate: Math.round(((dayTotals.p + dayTotals.o + dayTotals.i) / dayTotals.tot) * 100),
+        p: dayTotals.p,
+        a: dayTotals.a,
+        tot: dayTotals.tot,
+        completion: markingCompletion
+      };
+    }
+    // Otherwise fallback to period totals
+    return {
+      rate: periodGrandRate,
+      p: periodTotals.p,
+      a: periodTotals.a,
+      tot: periodTotals.tot,
+      completion: 0
+    };
+  }, [dayTotals, periodGrandRate, periodTotals, markingCompletion]);
 
   // 2. Group by class
   const classReports = useMemo(() => {
@@ -181,8 +205,9 @@ export default function HODReports() {
       const totalP = c.logs.reduce((s, l) => s + (l.present || 0), 0);
       const totalA = c.logs.reduce((s, l) => s + (l.absent || 0), 0);
       const totalO = c.logs.reduce((s, l) => s + (l.onDuty || 0), 0);
-      const total = totalP + totalA + totalO;
-      const rate = total > 0 ? Math.round(((totalP + totalO) / total) * 100) : 0;
+      const totalI = c.logs.reduce((s, l) => s + (l.intern || 0), 0);
+      const total = totalP + totalA + totalO + totalI;
+      const rate = total > 0 ? Math.round(((totalP + totalO + totalI) / total) * 100) : 0;
       return { 
         className: c.className, 
         markedBy: c.markedBy, 
@@ -190,6 +215,7 @@ export default function HODReports() {
         present: totalP, 
         absent: totalA, 
         onDuty: totalO, 
+        intern: totalI,
         total, 
         rate, 
         sessions: c.logs.length 
@@ -200,12 +226,12 @@ export default function HODReports() {
   // 3. Effects
   useEffect(() => {
     if (!loading) {
-      progress.value = withDelay(500, withTiming(periodGrandRate / 100, {
-        duration: 1500,
+      progress.value = withDelay(100, withTiming(displayStats.rate / 100, {
+        duration: 1000,
         easing: Easing.out(Easing.exp)
       }));
     }
-  }, [loading, periodGrandRate, progress]);
+  }, [loading, displayStats.rate, progress]);
 
   const animatedProps = useAnimatedProps(() => {
     const circumference = 2 * Math.PI * 45;
@@ -386,7 +412,7 @@ export default function HODReports() {
                   transform="rotate(-90 50 50)"
                 />
                 <SvgText x="50" y="48" fontSize="22" fontWeight="900" fill="#FFF" textAnchor="middle">
-                  {loading ? '—' : `${periodGrandRate}%`}
+                  {loading ? '—' : `${displayStats.rate}%`}
                 </SvgText>
                 <SvgText x="50" y="65" fontSize="8" fontWeight="600" fill="rgba(255,255,255,0.4)" textAnchor="middle">
                   ATTENDANCE
@@ -398,17 +424,17 @@ export default function HODReports() {
             <View style={styles.headerStatsGrid}>
               <Animated.View entering={FadeInDown.delay(300).duration(800)} style={styles.headerStatCard}>
                 <BadgeCheck size={16} color="#10B981" />
-                <Text style={styles.headerStatVal}>{markingCompletion}%</Text>
+                <Text style={styles.headerStatVal}>{displayStats.completion}%</Text>
                 <Text style={styles.headerStatLbl}>MarkingDone</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(400).duration(800)} style={styles.headerStatCard}>
                 <Users size={16} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.headerStatVal}>{periodTotals.p}</Text>
+                <Text style={styles.headerStatVal}>{displayStats.p}</Text>
                 <Text style={styles.headerStatLbl}>Present</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(500).duration(800)} style={styles.headerStatCard}>
                 <AlertCircle size={16} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.headerStatVal}>{periodTotals.a}</Text>
+                <Text style={styles.headerStatVal}>{displayStats.a}</Text>
                 <Text style={styles.headerStatLbl}>Absent</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(600).duration(800)} style={styles.headerStatCard}>
@@ -472,10 +498,14 @@ export default function HODReports() {
                <Text style={styles.statSubVal}>{dayTotals.a}</Text>
                <Text style={styles.statSubLbl}>Absent</Text>
              </View>
-             <View style={styles.summaryVerticalDivider} />
              <View style={styles.summaryStat}>
                <Text style={styles.statSubVal}>{dayTotals.o}</Text>
-               <Text style={styles.statSubLbl}>On Duty</Text>
+               <Text style={styles.statSubLbl}>OD</Text>
+             </View>
+             <View style={styles.summaryVerticalDivider} />
+             <View style={styles.summaryStat}>
+               <Text style={styles.statSubVal}>{dayTotals.i}</Text>
+               <Text style={styles.statSubLbl}>Intern</Text>
              </View>
           </View>
         </View>
@@ -708,9 +738,9 @@ export default function HODReports() {
                         <Text style={styles.statVal}>{cls.absent}</Text>
                       </View>
                       <View style={styles.stuStatItem}>
-                        <View style={[styles.statDot, { backgroundColor: '#F59E0B' }]} />
-                        <Text style={styles.statLbl}>On Duty</Text>
-                        <Text style={styles.statVal}>{cls.onDuty}</Text>
+                        <View style={[styles.statDot, { backgroundColor: '#8B5CF6' }]} />
+                        <Text style={styles.statLbl}>Intern</Text>
+                        <Text style={styles.statVal}>{cls.intern}</Text>
                       </View>
                       <Pressable onPress={() => downloadClassReport(cls)} style={styles.miniDlBtn}>
                         <Download size={16} color={colors.primaryBlue} />

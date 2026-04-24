@@ -303,6 +303,7 @@ export default function StaffHome() {
           case 'unapproved': unapprovedCount++; unapprovedList.push(entry); break;
           case 'absent': absentCount++; approvedList.push(entry); break;
           case 'on-duty': odCount++; odList.push(entry); break;
+          case 'intern': internCount++; internList.push(entry); break;
         }
       });
 
@@ -582,7 +583,14 @@ export default function StaffHome() {
 
         {/* ── DEPARTMENT CLASSES ── */}
         <View style={s.sectionWrap}>
-          <Text style={s.sectionTitle}>Department Classes</Text>
+          <View style={s.sectionHeader}>
+            <Text style={s.sectionTitle}>Department Classes</Text>
+            {deptClassesStatus.length > 0 && (
+              <View style={s.countBadge}>
+                <Text style={s.countBadgeTxt}>{deptClassesStatus.length}</Text>
+              </View>
+            )}
+          </View>
           {deptClassesStatus.length === 0 ? (
             <View style={[s.actCard, { padding: 28, alignItems: 'center', gap: 8 }]}>
               <MaterialIcons name="history" size={28} color="#CBD5E1" />
@@ -642,6 +650,11 @@ export default function StaffHome() {
                         {clsStatus.onDuty > 0 && (
                           <View style={[s.richChip, { backgroundColor: '#EFF6FF' }]}>
                             <Text style={[s.richChipTxt, { color: '#3B82F6' }]}>{clsStatus.onDuty}OD</Text>
+                          </View>
+                        )}
+                        {clsStatus.intern > 0 && (
+                          <View style={[s.richChip, { backgroundColor: '#F5F3FF' }]}>
+                            <Text style={[s.richChipTxt, { color: '#8B5CF6' }]}>{clsStatus.intern}I</Text>
                           </View>
                         )}
                       </View>

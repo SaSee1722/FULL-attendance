@@ -162,6 +162,27 @@ export default function DepartmentReport() {
     return Math.round((dayTotals.sess / stats.totalClasses) * 100);
   }, [dayTotals.sess, stats.totalClasses]);
 
+  const displayStats = useMemo(() => {
+    // If the selected day has data, prioritize it for the header
+    if (dayTotals.sess > 0) {
+      return {
+        rate: Math.round(((dayTotals.p + dayTotals.o) / dayTotals.tot) * 100),
+        p: dayTotals.p,
+        a: dayTotals.a,
+        tot: dayTotals.tot,
+        completion: markingCompletion
+      };
+    }
+    // Otherwise fallback to period totals
+    return {
+      rate: periodGrandRate,
+      p: periodTotals.p,
+      a: periodTotals.a,
+      tot: periodTotals.tot,
+      completion: 0 // Marking completion is day-specific
+    };
+  }, [dayTotals, periodGrandRate, periodTotals, markingCompletion]);
+
   const classReports = useMemo(() => {
     const classSummary: Record<string, { logs: any[]; className: string; markedBy: string; advisorImage?: string }> = {};
     focusLogs.forEach(l => {
@@ -194,12 +215,12 @@ export default function DepartmentReport() {
 
   useEffect(() => {
     if (!loading) {
-      progress.value = withDelay(500, withTiming(periodGrandRate / 100, {
-        duration: 1500,
+      progress.value = withDelay(100, withTiming(displayStats.rate / 100, {
+        duration: 1000,
         easing: Easing.out(Easing.exp)
       }));
     }
-  }, [loading, periodGrandRate, progress]);
+  }, [loading, displayStats.rate, progress]);
 
   const animatedProps = useAnimatedProps(() => {
     const circumference = 2 * Math.PI * 45;
@@ -369,7 +390,7 @@ export default function DepartmentReport() {
                   strokeLinecap="round" transform="rotate(-90 50 50)"
                 />
                 <SvgText x="50" y="48" fontSize="22" fontWeight="900" fill="#FFF" textAnchor="middle">
-                  {loading ? '—' : `${periodGrandRate}%`}
+                  {loading ? '—' : `${displayStats.rate}%`}
                 </SvgText>
                 <SvgText x="50" y="65" fontSize="8" fontWeight="600" fill="rgba(255,255,255,0.4)" textAnchor="middle">
                   ATTENDANCE
@@ -381,17 +402,17 @@ export default function DepartmentReport() {
             <View style={styles.headerStatsGrid}>
               <Animated.View entering={FadeInDown.delay(300).duration(800)} style={styles.headerStatCard}>
                 <BadgeCheck size={16} color="#10B981" />
-                <Text style={styles.headerStatVal}>{markingCompletion}%</Text>
+                <Text style={styles.headerStatVal}>{displayStats.completion}%</Text>
                 <Text style={styles.headerStatLbl}>MarkingDone</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(400).duration(800)} style={styles.headerStatCard}>
                 <Users size={16} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.headerStatVal}>{periodTotals.p}</Text>
+                <Text style={styles.headerStatVal}>{displayStats.p}</Text>
                 <Text style={styles.headerStatLbl}>Present</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(500).duration(800)} style={styles.headerStatCard}>
                 <AlertCircle size={16} color="rgba(255,255,255,0.4)" />
-                <Text style={styles.headerStatVal}>{periodTotals.a}</Text>
+                <Text style={styles.headerStatVal}>{displayStats.a}</Text>
                 <Text style={styles.headerStatLbl}>Absent</Text>
               </Animated.View>
               <Animated.View entering={FadeInDown.delay(600).duration(800)} style={styles.headerStatCard}>

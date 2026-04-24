@@ -31,6 +31,7 @@ export interface Student {
   rollNo: string;
   classId: string;
   attendanceRate: number;
+  isIntern?: boolean;
 }
 
 export interface StaffMember {
@@ -58,7 +59,7 @@ export interface AttendanceRecord {
   studentId: string;
   classId: string;
   date: string;
-  status: 'present' | 'absent' | 'on-duty' | 'unapproved';
+  status: 'present' | 'absent' | 'on-duty' | 'unapproved' | 'intern';
   markedBy: string;
   timestamp: string;
 }
@@ -93,6 +94,10 @@ function clearCachePrefix(prefix: string) {
 export const dataService = {
   clearCache() { 
     Object.keys(memoryCache).forEach(k => delete memoryCache[k]); 
+  },
+  clearStatsCache() {
+    clearCachePrefix('stats-');
+    clearCachePrefix('dept-');
   },
   // ── Profiles ───────────────────────────────────────────────────
   async getCurrentProfile(): Promise<Profile | null> {
@@ -222,22 +227,22 @@ export const dataService = {
           .lte('date', todayStr),
       ]);
 
-      // Build advisor image map from both sources (managed staff takes precedence for virtual users)
+      // Build advisor image map from both sources (profile takes precedence over managed staff)
       const imageMap: Record<string, string> = {};
       const t = Date.now();
-      
-      (profilesRes.data || []).forEach((ap: any) => {
-        if (ap.name && ap.profile_image) {
-          const url = ap.profile_image;
-          // Bypass React Native Image caching
-          imageMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
-        }
-      });
       
       (managedRes.data || []).forEach((ms: any) => {
         if (ms.name && ms.profile_image) {
           const url = ms.profile_image;
           imageMap[ms.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+        }
+      });
+
+      (profilesRes.data || []).forEach((ap: any) => {
+        if (ap.name && ap.profile_image) {
+          const url = ap.profile_image;
+          // Bypass React Native Image caching
+          imageMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
         }
       });
 
@@ -255,8 +260,11 @@ export const dataService = {
         
         // Priority Fallback: If current user is the advisor and has an image set, use it
         // This handles cases where DB might be slightly behind or schema differs
-        if (!advisorImage && profile && c.advisor === profile.name && profile.profile_image) {
-          advisorImage = profile.profile_image;
+        const profileName = (profile?.name || '').trim().toLowerCase();
+        const advisorName = (c.advisor || '').trim().toLowerCase();
+        if (!advisorImage && profile && advisorName === profileName && (profile.profile_image || (profile as any).profileImage)) {
+          const url = profile.profile_image || (profile as any).profileImage;
+          advisorImage = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
         }
 
         return {
@@ -346,7 +354,8 @@ export const dataService = {
         name: s.name,
         rollNo: s.roll_no,
         classId: s.class_id,
-        attendanceRate: s.attendance_rate != null ? s.attendance_rate : 100
+        attendanceRate: s.attendance_rate != null ? s.attendance_rate : 100,
+        isIntern: s.is_intern || false
       }));
       setCache(cacheKey, result, TTL.students);
       // Persist for offline
@@ -379,6 +388,8 @@ export const dataService = {
       .select()
       .single();
     if (error) throw error;
+    this.clearCachePrefix('stu-');
+    this.clearStatsCache();
     return {
       id: data.id,
       name: data.name,
@@ -399,6 +410,8 @@ export const dataService = {
       .select()
       .single();
     if (error) throw error;
+    this.clearCachePrefix('stu-');
+    this.clearStatsCache();
     return {
       id: data.id,
       name: data.name,
@@ -411,6 +424,20 @@ export const dataService = {
   async deleteStudent(id: string, classId: string) {
     const { error } = await supabase.from('students').delete().eq('id', id);
     if (error) throw error;
+  },
+
+  async togglePermanentIntern(studentId: string, isIntern: boolean) {
+    const { error } = await supabase
+      .from('students')
+      .update({ is_intern: isIntern })
+      .eq('id', studentId);
+    
+    if (error) throw error;
+    this.clearStatsCache();
+    
+    // Clear student caches
+    clearCachePrefix('students_');
+    clearCachePrefix('classes_');
   },
 
   // ── Staff ────────────────────────────────────────────────────
@@ -468,7 +495,14 @@ export const dataService = {
         .order('created_at', { ascending: false });
       
       if (error) throw error;
-      return data || [];
+      const t = Date.now();
+      return (data || []).map(p => {
+        if (p.profile_image) {
+          const url = p.profile_image;
+          p.profile_image = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+        }
+        return p;
+      });
     } catch (e) {
       console.error('getHODs error:', e);
       return [];
@@ -501,6 +535,7 @@ export const dataService = {
         .select();
       
       if (error) throw error;
+      this.clearStatsCache();
       
       // If no rows updated by ID, try one last time by name/role if we had a check result
       if ((!data || data.length === 0) && check?.email) {
@@ -512,6 +547,7 @@ export const dataService = {
           .select();
           
         if (fallbackError) throw fallbackError;
+        this.clearStatsCache();
         if (!fallbackData || fallbackData.length === 0) {
           throw new Error('Approval failed: Profile exists but could not be updated. Check RLS policies.');
         }
@@ -908,11 +944,16 @@ export const dataService = {
   // ── Helpers ────────────────────────────────────────────────────
   getDepartmentAliases(dept: string): string[] {
     const deptAliases: Record<string, string[]> = {
-      'computer science': ['cse', 'cs', 'it', 'compsci'],
-      'electronics and communication': ['ece', 'electronics'],
+      'computer science': ['cse', 'cs', 'it', 'compsci', 'computer science and engineering'],
+      'cse': ['computer science', 'cs', 'it', 'compsci', 'computer science and engineering'],
+      'electronics and communication': ['ece', 'electronics', 'enc'],
+      'ece': ['electronics and communication', 'electronics', 'enc'],
       'electrical and electronics': ['eee', 'electrical'],
+      'eee': ['electrical and electronics', 'electrical'],
       'mechanical': ['mech', 'mechanical engineering'],
-      'information technology': ['it', 'cse-it'],
+      'mech': ['mechanical', 'mechanical engineering'],
+      'information technology': ['it', 'cse-it', 'infotech'],
+      'it': ['information technology', 'infotech', 'cse-it'],
       'civil': ['civil', 'civil engineering']
     };
     const normalized = dept?.toLowerCase().trim() || '';
@@ -920,12 +961,36 @@ export const dataService = {
   },
 
   matchesDepartment(targetDept: string, profileDept: string): boolean {
-    const t = targetDept?.toLowerCase().trim() || '';
-    const p = profileDept?.toLowerCase().trim() || '';
-    if (t === p) return true;
-    const aliases = this.getDepartmentAliases(p);
-    if (aliases.includes(t)) return true;
-    if (p.length > 2 && (t.includes(p) || p.includes(t))) return true;
+    if (!targetDept || !profileDept) return false;
+    
+    const normalize = (s: string) => {
+      let n = s.toLowerCase().trim();
+      // Remove common suffixes/prefixes
+      n = n.replace(/ engineering$/i, '')
+           .replace(/ engineering-?/i, '')
+           .replace(/ dept\.?$/i, '')
+           .replace(/^dept\.? of /i, '')
+           .replace(/ faculty of /i, '')
+           .replace(/ department$/i, '')
+           .trim();
+      // Common shorthand mappings
+      if (n === 'computer science' || n === 'cs' || n === 'cse' || n === 'compsci') return 'cse';
+      if (n === 'information technology' || n === 'it') return 'it';
+      if (n === 'electronics' || n === 'ece') return 'ece';
+      if (n === 'electrical' || n === 'eee') return 'eee';
+      if (n === 'mechanical' || n === 'mech') return 'mech';
+      return n;
+    };
+
+    const nt = normalize(targetDept);
+    const np = normalize(profileDept);
+
+    if (nt === np || nt.includes(np) || np.includes(nt)) return true;
+
+    // Check specific known aliases if normalization didn't catch it
+    const aliases = this.getDepartmentAliases(np);
+    if (aliases.some(a => nt.includes(normalize(a)) || normalize(a).includes(nt))) return true;
+    
     return false;
   },
 
@@ -971,11 +1036,17 @@ export const dataService = {
         filteredClasses = allClasses.filter(c => c.advisor === profile.name);
       }
 
-      const totalStudentsCount = filteredClasses.reduce((acc, c) => acc + (c.student_count || 0), 0);
+      // Get FRESH total student count directly from the students table
+      const { count: studentCountDb } = await supabase
+        .from('students')
+        .select('*', { count: 'exact', head: true })
+        .in('class_id', filteredClasses.map(c => c.id));
+
+      const totalStudentsCount = studentCountDb || 0;
       
       // Calculate TRUE weighted average attendance
       const totalAttendanceWeight = filteredClasses.reduce((acc, c) => {
-        return acc + ((c.attendance_rate || 0) * (c.student_count || 0));
+        return acc + ((c.attendance_rate || 0) * (c.student_count || 1));
       }, 0);
       const weightedAvg = totalStudentsCount > 0 ? (totalAttendanceWeight / totalStudentsCount) : 0;
 
@@ -1114,10 +1185,38 @@ export const dataService = {
       const sessions = Object.values(sessionsMap);
       const advisorNames = [...new Set(sessions.map(s => s.advisor).filter(Boolean))];
       if (advisorNames.length > 0) {
-        const { data: ads } = await supabase.from('profiles').select('name, profile_image').in('name', advisorNames);
+        // Fetch advisor images from BOTH sources
+        const [profData, managedData] = await Promise.all([
+          supabase.from('profiles').select('name, profile_image').in('name', advisorNames),
+          supabase.from('managed_staff').select('name, profile_image').in('name', advisorNames)
+        ]);
+        
         const imgMap: Record<string, string> = {};
-        ads?.forEach(ap => { if (ap.name && ap.profile_image) imgMap[ap.name.trim().toLowerCase()] = ap.profile_image; });
-        sessions.forEach(s => { if (s.advisor) s.advisorImage = imgMap[s.advisor.trim().toLowerCase()]; });
+        const t = Date.now();
+        profData.data?.forEach(ap => { 
+          if (ap.name && ap.profile_image) {
+            const url = ap.profile_image;
+            imgMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
+        managedData.data?.forEach(am => { 
+          if (am.name && am.profile_image) {
+            const url = am.profile_image;
+            imgMap[am.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
+        
+        sessions.forEach(s => {
+          if (s.advisor) {
+            s.advisorImage = imgMap[s.advisor.trim().toLowerCase()] || null;
+            
+            // Priority Fallback: If current user is the advisor and has an image set, use it
+            if (!s.advisorImage && profile && s.advisor === profile.name && (profile.profile_image || (profile as any).profileImage)) {
+              const url = profile.profile_image || (profile as any).profileImage;
+              s.advisorImage = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+            }
+          }
+        });
       }
 
       const res = sessions.sort((a,b) => {
@@ -1229,12 +1328,13 @@ export const dataService = {
             date: r.date,
             markedBy: prof?.name || 'System',
             timestamp: r.timestamp,
-            present: 0, absent: 0, onDuty: 0, unapproved: 0,
+            present: 0, absent: 0, onDuty: 0, unapproved: 0, intern: 0,
             totalStudents: 0,
             presentStudents: [] as { name: string; rollNo: string }[],
             absentStudents: [] as { name: string; rollNo: string }[],
             onDutyStudents: [] as { name: string; rollNo: string }[],
             unapprovedStudents: [] as { name: string; rollNo: string }[],
+            internStudents: [] as { name: string; rollNo: string }[],
           };
         }
 
@@ -1253,13 +1353,39 @@ export const dataService = {
       const sessions = Object.values(sessionsMap);
       const advisorNames = [...new Set(sessions.map(s => s.advisor).filter(Boolean))];
       if (advisorNames.length > 0) {
-        const { data: ads } = await supabase
-          .from('profiles')
-          .select('name, profile_image')
-          .in('name', advisorNames);
+        const [profilesRes, managedRes] = await Promise.all([
+          supabase.from('profiles').select('name, profile_image').in('name', advisorNames.map((n: any) => n.trim())),
+          supabase.from('managed_staff').select('name, profile_image').in('name', advisorNames.map((n: any) => n.trim()))
+        ]);
+
         const imgMap: Record<string, string> = {};
-        ads?.forEach(ap => { if (ap.name && ap.profile_image) imgMap[ap.name.trim().toLowerCase()] = ap.profile_image; });
-        sessions.forEach(s => { if (s.advisor) s.advisorImage = imgMap[s.advisor.trim().toLowerCase()] || null; });
+        const t = Date.now();
+        
+        (profilesRes.data || []).forEach((ap: any) => {
+          if (ap.name && ap.profile_image) {
+            const url = ap.profile_image;
+            imgMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
+        
+        (managedRes.data || []).forEach((ms: any) => {
+          if (ms.name && ms.profile_image) {
+            const url = ms.profile_image;
+            imgMap[ms.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
+
+        sessions.forEach(s => {
+          if (s.advisor) {
+            s.advisorImage = imgMap[s.advisor.trim().toLowerCase()] || null;
+            
+            // Priority Fallback: If current user is the advisor and has an image set, use it
+            if (!s.advisorImage && profile && s.advisor === profile.name && (profile.profile_image || (profile as any).profileImage)) {
+              const url = profile.profile_image || (profile as any).profileImage;
+              s.advisorImage = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+            }
+          }
+        });
       }
 
       // Step 4: Sort by most recent, limit
@@ -1279,17 +1405,44 @@ export const dataService = {
     try {
       const profile = await this.getCurrentProfile();
       if (!profile) return [];
-
       const today = new Date().toISOString().split('T')[0];
 
-      // Step 1: Get all classes in the department
+      // Step 1: Fetch classes with specific columns to avoid potential RLS '*' issues
       const { data: allClasses, error: classesError } = await supabase
         .from('classes')
-        .select('*');
+        .select('id, name, department, year, section, advisor, advisor_staff_id, student_count');
 
-      if (classesError || !allClasses) return [];
+      if (classesError) {
+        console.error('getDepartmentClassesTodayStatus: classes fetch error', classesError);
+        return [];
+      }
+      if (!allClasses || allClasses.length === 0) return [];
 
-      const deptClasses = allClasses.filter(c => this.matchesDepartment(c.department, profile.department));
+      let userDept = profile.department;
+      
+      // Attempt to find a reference class for the user to determine their actual department in the DB
+      const referenceClass = allClasses.find(c => {
+        const adv = (c.advisor || '').trim().toLowerCase();
+        const profNm = (profile.name || '').trim().toLowerCase();
+        const advId = (c.advisor_staff_id || '').trim();
+        const profId = (profile.staff_id || '').trim();
+        return (adv === profNm && profNm !== '') || (profId !== '' && advId === profId);
+      });
+
+      // If profile department is missing or mismatching, use the reference class's department
+      if (!userDept || userDept === '' || userDept === 'all' || (referenceClass && !this.matchesDepartment(referenceClass.department, userDept))) {
+        if (referenceClass) userDept = referenceClass.department;
+      }
+
+      let deptClasses = allClasses.filter(c => {
+        if (!userDept) return false;
+        return this.matchesDepartment(c.department, userDept);
+      });
+
+      // Absolute fallback: if still zero but we have a reference class, at least show the user's own classes
+      if (deptClasses.length === 0 && referenceClass) {
+        deptClasses = [referenceClass];
+      }
       const classIds = deptClasses.map(c => c.id);
 
       if (classIds.length === 0) return [];
@@ -1318,13 +1471,14 @@ export const dataService = {
           advisor: c.advisor,
           totalStudents: c.student_count || 0,
           isMarked: false,
-          present: 0, absent: 0, onDuty: 0, unapproved: 0,
+          present: 0, absent: 0, onDuty: 0, unapproved: 0, intern: 0,
           markedBy: null,
           timestamp: null,
           absentStudents: [],
           onDutyStudents: [],
           unapprovedStudents: [],
-          presentStudents: []
+          presentStudents: [],
+          internStudents: []
         };
       });
 
@@ -1344,6 +1498,7 @@ export const dataService = {
         else if (stat === 'absent') { s.absent++; s.absentStudents.push(studentInfo); }
         else if (stat === 'on-duty') { s.onDuty++; s.onDutyStudents.push(studentInfo); }
         else if (stat === 'unapproved') { s.unapproved++; s.unapprovedStudents.push(studentInfo); }
+        else if (stat === 'intern') { s.intern++; s.internStudents.push(studentInfo); }
       });
 
       // Fetch advisor profile images from both sources
@@ -1357,17 +1512,17 @@ export const dataService = {
         const imgMap: Record<string, string> = {};
         const timestamp = Date.now();
         
-        profilesRes.data?.forEach(ap => {
-          if (ap.name && ap.profile_image) {
-            const url = ap.profile_image;
-            imgMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${timestamp}` : `${url}?v=${timestamp}`;
-          }
-        });
-        
         managedRes.data?.forEach(ms => {
           if (ms.name && ms.profile_image) {
             const url = ms.profile_image;
             imgMap[ms.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${timestamp}` : `${url}?v=${timestamp}`;
+          }
+        });
+        
+        profilesRes.data?.forEach(ap => {
+          if (ap.name && ap.profile_image) {
+            const url = ap.profile_image;
+            imgMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${timestamp}` : `${url}?v=${timestamp}`;
           }
         });
 
@@ -1377,8 +1532,11 @@ export const dataService = {
             status.advisorImage = imgMap[c.advisor.trim().toLowerCase()] || null;
             
             // Fallback for current user
-            if (!status.advisorImage && profile && c.advisor === profile.name && profile.profile_image) {
-               status.advisorImage = profile.profile_image;
+            const profileName = (profile?.name || '').trim().toLowerCase();
+            const advisorName = (c.advisor || '').trim().toLowerCase();
+            if (!status.advisorImage && profile && advisorName === profileName && (profile.profile_image || (profile as any).profileImage)) {
+               const url = profile.profile_image || (profile as any).profileImage;
+               status.advisorImage = url.includes('?') ? `${url}&v=${timestamp}` : `${url}?v=${timestamp}`;
             }
           }
         });
@@ -1465,6 +1623,42 @@ export const dataService = {
         ...completedSessions.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
         ...otherLogs
       ];
+
+      // Fetch user images for combined logs
+      const allUsers = [...new Set(combined.map(l => l.user).filter(Boolean))];
+      if (allUsers.length > 0) {
+        const [profData, managedData] = await Promise.all([
+          supabase.from('profiles').select('name, profile_image').in('name', allUsers),
+          supabase.from('managed_staff').select('name, profile_image').in('name', allUsers)
+        ]);
+
+        const imgMap: Record<string, string> = {};
+        const t = Date.now();
+        profData.data?.forEach(ap => { 
+          if (ap.name && ap.profile_image) {
+            const url = ap.profile_image;
+            imgMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
+        managedData.data?.forEach(am => { 
+          if (am.name && am.profile_image) {
+            const url = am.profile_image;
+            imgMap[am.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
+
+        combined.forEach(l => {
+          if (l.user) {
+            l.userImage = imgMap[l.user.trim().toLowerCase()] || null;
+            
+            // Priority Fallback: If current user is the actor and has an image set, use it
+            if (!l.userImage && profile && l.user === profile.name && (profile.profile_image || (profile as any).profileImage)) {
+              const url = profile.profile_image || (profile as any).profileImage;
+              l.userImage = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+            }
+          }
+        });
+      }
 
       return combined.slice(0, limit);
     } catch (e) {
@@ -1720,20 +1914,32 @@ export const dataService = {
         if (c.advisor) classByAdvisor[c.advisor.trim().toLowerCase()] = c.name;
       });
 
-      const allStaff = [...(profiles || [])];
+      const t = Date.now();
+      const allStaff = (profiles || []).map(p => {
+        if (p.profile_image) {
+          const url = p.profile_image;
+          p.profile_image = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+        }
+        return p;
+      });
       
       managed?.forEach(m => {
         const found = allStaff.find(p => p.name === m.name && p.department === m.department);
         if (!found) {
+          let pimg = m.profile_image;
+          if (pimg) pimg = pimg.includes('?') ? `${pimg}&v=${t}` : `${pimg}?v=${t}`;
+          
           allStaff.push({
             id: m.id,
             name: m.name,
             department: m.department,
-            profile_image: m.profile_image,
+            profile_image: pimg,
             role: 'staff' // Managed staff are always staff role
           });
-        } else if (!found.profile_image && m.profile_image) {
-          found.profile_image = m.profile_image;
+        } else if (m.profile_image && !found.profile_image) {
+          // If profile has no image but managed has one, use it
+          const url = m.profile_image;
+          found.profile_image = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
         }
       });
 
@@ -1833,16 +2039,41 @@ export const dataService = {
           supabase.from('profiles').select('name, profile_image').in('name', advisorNames),
           supabase.from('managed_staff').select('name, profile_image').in('name', advisorNames)
         ]);
-        ads?.forEach(ap => { if (ap.name && ap.profile_image) imageMap[ap.name.trim().toLowerCase()] = ap.profile_image; });
-        ms?.forEach(m => { if (m.name && m.profile_image) imageMap[m.name.trim().toLowerCase()] = m.profile_image; });
+        const t = Date.now();
+        ms?.forEach(m => { 
+          if (m.name && m.profile_image) {
+            const url = m.profile_image;
+            imageMap[m.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
+        ads?.forEach(ap => { 
+          if (ap.name && ap.profile_image) {
+            const url = ap.profile_image;
+            imageMap[ap.name.trim().toLowerCase()] = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+        });
       }
 
+      const profile = await this.getCurrentProfile();
       return Object.entries(grouped).map(([dept, deptClasses]) => ({
         department: dept,
-        classes: deptClasses.map(c => ({
-          ...c,
-          advisorImage: c.advisor ? imageMap[c.advisor.trim().toLowerCase()] : null
-        })),
+        classes: deptClasses.map(c => {
+          const t = Date.now();
+          let advisorImage = c.advisor ? imageMap[c.advisor.trim().toLowerCase()] : null;
+          
+          // Fallback for current user
+          const profileName = (profile?.name || '').trim().toLowerCase();
+          const advisorName = (c.advisor || '').trim().toLowerCase();
+          if (!advisorImage && profile && advisorName === profileName && (profile.profile_image || (profile as any).profileImage)) {
+            const url = profile.profile_image || (profile as any).profileImage;
+            advisorImage = url.includes('?') ? `${url}&v=${t}` : `${url}?v=${t}`;
+          }
+          
+          return {
+            ...c,
+            advisorImage
+          };
+        }),
         totalStudents: deptClasses.reduce((acc, cls) => acc + cls.students.length, 0)
       }));
     } catch (e) {

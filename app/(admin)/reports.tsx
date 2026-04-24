@@ -268,7 +268,11 @@ export default function AdminReports() {
             >
               <View style={styles.logHeader}>
                 <View style={styles.logIconWrapper}>
-                  <Ionicons name="calendar-outline" size={18} color={colors.admin} />
+                  {log.advisorImage ? (
+                    <Image source={{ uri: log.advisorImage }} style={{ width: '100%', height: '100%', borderRadius: 10 }} />
+                  ) : (
+                    <Ionicons name="calendar-outline" size={18} color={colors.admin} />
+                  )}
                 </View>
                 <View style={styles.logClassInfo}>
                   <Text style={styles.logClassName}>{log.className}</Text>

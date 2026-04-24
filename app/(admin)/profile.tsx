@@ -10,15 +10,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { 
-  User, Mail, School, BadgeCheck, Settings, 
-  LogOut, Camera, Edit3, ChevronRight,
-  Bell, Shield, HelpCircle, Info, Timer
+  User, Mail, School, BadgeCheck, 
+  LogOut, Camera, Edit3, 
+  Shield, Info
 } from 'lucide-react-native';
 import { useAuth } from '../../hooks/useAuth';
 import { authService } from '../../services/authService';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, shadows, gradients } from '../../constants/theme';
 import { useRouter } from 'expo-router';
+import { dataService } from '../../services/dataService';
 
 export default function AdminProfile() {
   const insets = useSafeAreaInsets();
@@ -72,6 +73,10 @@ export default function AdminProfile() {
         const uploadedUrl = await authService.updateProfileImage(uri);
         setImageUri(uploadedUrl || uri);
         if (refreshUser) await refreshUser();
+        
+        // Clear caches to force refresh of profile images everywhere
+        dataService.clearCache();
+        Alert.alert('Success', 'Profile image updated successfully');
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to update image.');
@@ -333,16 +338,6 @@ const styles = StyleSheet.create({
   editBtnText: { fontSize: 13, fontWeight: '800', color: colors.admin },
   bioText: { fontSize: 14, color: '#475569', lineHeight: 22, padding: spacing.lg, fontWeight: '500' },
   
-  // Setting Row
-  settingRow: {
-    flexDirection: 'row', alignItems: 'center',
-    padding: 16, marginHorizontal: 12, borderRadius: 20,
-    marginBottom: 8, backgroundColor: '#F8FAFC',
-  },
-  settingIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  settingText: { flex: 1 },
-  settingLabel: { fontSize: 15, fontWeight: '800', color: '#1E293B' },
-  settingSub: { fontSize: 12, color: '#94A3B8', marginTop: 2, fontWeight: '500' },
 
   // Detail Row
   detailRow: {

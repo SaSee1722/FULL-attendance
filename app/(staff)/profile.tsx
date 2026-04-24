@@ -17,6 +17,7 @@ import { authService } from '../../services/authService';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, shadows, gradients } from '../../constants/theme';
 import { useRouter } from 'expo-router';
+import { dataService } from '../../services/dataService';
 
 export default function StaffProfile() {
   const insets = useSafeAreaInsets();
@@ -76,7 +77,6 @@ export default function StaffProfile() {
         setImageUri(uploadedUrl || uri);
         
         // Clear full cache so dashboard cards and profile avatar refresh
-        const { dataService } = await import('../../services/dataService');
         dataService.clearCache();
         
         if (refreshUser) await refreshUser();

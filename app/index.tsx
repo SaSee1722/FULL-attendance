@@ -3,97 +3,91 @@ import { View, Text, StyleSheet, Animated, StatusBar, Image, Dimensions } from '
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../hooks/useAuth';
-import { shadows } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
 
 export default function SplashScreen() {
   const router = useRouter();
   const { user, loading } = useAuth();
-  
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.85)).current;
-  const loadingProgress = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.92)).current;
   const textOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Sequence individual animations for a more cinematic feel
+    // Quick fade + scale in
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 1500,
+        duration: 400,
         useNativeDriver: true,
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
-        friction: 6,
-        tension: 30,
+        friction: 8,
+        tension: 40,
         useNativeDriver: true,
       }),
-      Animated.timing(loadingProgress, {
-        toValue: 1,
-        duration: 3000,
-        useNativeDriver: false,
-      }),
       Animated.sequence([
-        Animated.delay(600),
+        Animated.delay(200),
         Animated.timing(textOpacity, {
           toValue: 1,
-          duration: 1000,
+          duration: 300,
           useNativeDriver: true,
-        })
-      ])
+        }),
+      ]),
     ]).start();
 
     if (!loading) {
+      // Navigate after exactly 1 second
       const timer = setTimeout(() => {
-        const nextPath = user ? (
-          user.role === 'admin' ? '/(admin)' :
-          user.role === 'hod' ? '/(hod)' : '/(staff)'
-        ) : '/auth/login';
-        
+        const nextPath = user
+          ? user.role === 'admin'
+            ? '/(admin)'
+            : user.role === 'hod'
+            ? '/(hod)'
+            : '/(staff)'
+          : '/auth/login';
+
         router.replace(nextPath as any);
-      }, 3500);
+      }, 2000);
 
       return () => clearTimeout(timer);
     }
-  }, [user, loading, router, fadeAnim, scaleAnim, loadingProgress, textOpacity]);
-
-  const progressWidth = loadingProgress.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
+  }, [user, loading, router, fadeAnim, scaleAnim, textOpacity]);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       <LinearGradient
         colors={['#020617', '#0F172A', '#1E293B']}
         style={styles.background}
       >
-        {/* Decorative Background Elements */}
+        {/* Subtle ambient glow */}
         <View style={styles.ambientGlow} />
-        
-        <Animated.View 
+
+        <Animated.View
           style={[
             styles.content,
-            { 
+            {
               opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }] 
-            }
+              transform: [{ scale: scaleAnim }],
+            },
           ]}
         >
+          {/* Logo container — sophisticated circular design */}
           <View style={styles.logoWrapper}>
-            <View style={styles.glassContainer}>
-              <Image 
-                source={require('../assets/images/logo.png')} 
-                style={styles.logoImage} 
-                resizeMode="contain" 
+            <View style={styles.logoCircle}>
+              <Image
+                source={require('../assets/images/applogo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
               />
             </View>
           </View>
-          
+
+          {/* App name + tagline */}
           <Animated.View style={{ opacity: textOpacity, alignItems: 'center' }}>
             <Text style={styles.brandName}>AttendX</Text>
             <View style={styles.taglineWrapper}>
@@ -101,21 +95,17 @@ export default function SplashScreen() {
               <Text style={styles.tagline}>INTELLIGENT PRESENCE</Text>
               <View style={styles.taglineLine} />
             </View>
+            <Text style={styles.description}>
+              Smart attendance management for schools.{`\n`}Efficient, Reliable, and Professional.
+            </Text>
           </Animated.View>
-          
-          <View style={styles.loadingWrapper}>
-            <View style={styles.loadingTrack}>
-              <Animated.View style={[styles.loadingBar, { width: progressWidth }]} />
-            </View>
-            <Text style={styles.loadingStatus}>Initializing secure session...</Text>
-          </View>
         </Animated.View>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>SYSTEM v1.2.0</Text>
-          <View style={styles.footerDot} />
-          <Text style={styles.footerText}>SECURED BY ATTENDX</Text>
-        </View>
+        {/* Footer — professionally highlighted */}
+        <Animated.View style={[styles.footer, { opacity: textOpacity }]}>
+          <View style={styles.footerSeparator} />
+          <Text style={styles.footerText}>DEVELOPED BY ZENLABS</Text>
+        </Animated.View>
       </LinearGradient>
     </View>
   );
@@ -147,97 +137,82 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   logoWrapper: {
-    width: 160,
-    height: 160,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 40,
+    // Layered shadows for depth
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 15 },
+    shadowOpacity: 0.25,
+    shadowRadius: 25,
+    elevation: 20,
   },
-  glassContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+  logoCircle: {
+    width: 140,
+    height: 140,
+    borderRadius: 32,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
     overflow: 'hidden',
-    ...shadows.lg,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   logoImage: {
-    width: '100%',
-    height: '100%',
+    width: '85%',
+    height: '85%',
+    backgroundColor: '#FFFFFF',
+    transform: [{ translateX: 6 }], // Nudge right to center the off-center source image
+  },
+  description: {
+    marginTop: 18,
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.5)',
+    textAlign: 'center',
+    lineHeight: 22,
+    letterSpacing: 0.4,
+    paddingHorizontal: 30,
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 54,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  footerSeparator: {
+    width: 30,
+    height: 2,
+    backgroundColor: '#3B82F6',
+    borderRadius: 1,
+    marginBottom: 12,
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#FFFFFF',
+    letterSpacing: 2,
+    fontWeight: '700',
+    opacity: 0.8,
   },
   brandName: {
-    fontSize: 42,
+    fontSize: 48,
     fontWeight: '900',
     color: '#FFFFFF',
-    letterSpacing: 1,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 10,
+    letterSpacing: 1.5,
   },
   taglineWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    gap: 12,
+    marginTop: 10,
+    gap: 15,
   },
   taglineLine: {
-    width: 20,
+    width: 25,
     height: 1,
-    backgroundColor: 'rgba(59, 130, 246, 0.5)',
+    backgroundColor: 'rgba(59, 130, 246, 0.6)',
   },
   tagline: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '800',
     color: '#3B82F6',
-    letterSpacing: 4,
-  },
-  loadingWrapper: {
-    width: '100%',
-    marginTop: 80,
-    alignItems: 'center',
-  },
-  loadingTrack: {
-    width: '70%',
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  loadingBar: {
-    height: '100%',
-    backgroundColor: '#3B82F6',
-    borderRadius: 2,
-  },
-  loadingStatus: {
-    marginTop: 16,
-    fontSize: 9,
-    fontWeight: '700',
-    color: 'rgba(255, 255, 255, 0.3)',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  footerText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: 'rgba(255, 255, 255, 0.2)',
-    letterSpacing: 1,
-  },
-  footerDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 1.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    letterSpacing: 5,
   },
 });

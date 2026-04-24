@@ -187,9 +187,9 @@ export default function AdminDashboard() {
                        onPress={() => router.push('/(admin)/profile')}
                     >
                       <View style={[styles.actionIcon, { backgroundColor: 'rgba(245, 158, 11, 0.2)' }]}>
-                        <Ionicons name="settings" size={18} color="#FBBF24" />
+                        <Ionicons name="person" size={18} color="#FBBF24" />
                       </View>
-                      <Text style={styles.actionLabel}>Setup</Text>
+                      <Text style={styles.actionLabel}>Profile</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -387,7 +387,11 @@ export default function AdminDashboard() {
                       <View style={styles.activityFooterRow}>
                         <View style={styles.activityOriginator}>
                           <View style={styles.originatorAvatar}>
-                            <Text style={styles.originatorInitial}>{log.user?.charAt(0)}</Text>
+                            {log.userImage ? (
+                              <Image source={{ uri: log.userImage }} style={{ width: '100%', height: '100%', borderRadius: 10 }} />
+                            ) : (
+                              <Text style={styles.originatorInitial}>{log.user?.charAt(0)}</Text>
+                            )}
                           </View>
                           <Text style={styles.originatorName}>{log.user || 'System'}</Text>
                         </View>
@@ -414,9 +418,9 @@ export default function AdminDashboard() {
               </View>
               <View style={styles.supportText}>
                 <Text style={styles.supportTitle}>Administrator Console</Text>
-                <Text style={styles.supportDesc}>Manage system-wide settings, user roles, and data integrity protocols.</Text>
+                <Text style={styles.supportDesc}>Manage your identity, bio, and access credentials.</Text>
               </View>
-              <Ionicons name="settings-sharp" size={24} color="#FFF" />
+              <Ionicons name="person-circle-sharp" size={24} color="#FFF" />
             </LinearGradient>
           </TouchableOpacity>
 

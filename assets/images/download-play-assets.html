@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download Play Store Images – AttendX</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #111; color: #fff; padding: 32px; text-align: center; }
+    h1 { margin-bottom: 8px; }
+    p { opacity: 0.6; margin-bottom: 32px; }
+    .section { background: #1a1a2e; border-radius: 16px; padding: 24px; margin: 24px auto; max-width: 600px; }
+    h2 { margin-bottom: 16px; font-size: 1rem; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+    canvas { border-radius: 12px; max-width: 100%; }
+    .btn {
+      display: inline-block; margin-top: 16px; background: #e94560; color: white;
+      padding: 12px 28px; border-radius: 8px; text-decoration: none;
+      font-weight: bold; cursor: pointer; border: none; font-size: 1rem;
+    }
+    .btn:hover { background: #c73250; }
+    .size-label { font-size: 0.8rem; opacity: 0.5; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<h1>🎨 AttendX – Play Store Assets</h1>
+<p>Click the download buttons below to save properly-sized PNG files for Google Play Console.</p>
+
+<!-- APP ICON -->
+<div class="section">
+  <h2>App Icon · 512 × 512 px</h2>
+  <canvas id="iconCanvas" width="512" height="512"></canvas>
+  <br/>
+  <button class="btn" onclick="downloadCanvas('iconCanvas','attendx-app-icon-512.png')">⬇ Download App Icon (PNG)</button>
+  <p class="size-label">512 × 512 px · Required for Google Play</p>
+</div>
+
+<!-- FEATURE GRAPHIC -->
+<div class="section">
+  <h2>Feature Graphic · 1024 × 500 px</h2>
+  <canvas id="featureCanvas" width="1024" height="500"></canvas>
+  <br/>
+  <button class="btn" onclick="downloadCanvas('featureCanvas','attendx-feature-graphic-1024x500.png')">⬇ Download Feature Graphic (PNG)</button>
+  <p class="size-label">1024 × 500 px · Required for Google Play</p>
+</div>
+
+<script>
+// ── Utility ──────────────────────────────────────────
+function downloadCanvas(canvasId, filename) {
+  const canvas = document.getElementById(canvasId);
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+function drawRoundedRect(ctx, x, y, w, h, r, fill) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+}
+
+// Load the new logo
+const logo = new Image();
+logo.src = 'applogo.png';
+logo.onload = () => {
+  drawIcon();
+  drawFeature();
+};
+
+// ── APP ICON 512×512 ──────────────────────────────────
+function drawIcon() {
+  const canvas = document.getElementById('iconCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = 512, H = 512;
+
+  // Background (White as requested)
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw Logo (Centered and scaled - with nudge)
+  const padding = 40;
+  const size = W - (padding * 2);
+  const nudgeX = 12; // Shift right to center the off-center logo
+  ctx.drawImage(logo, padding + nudgeX, padding, size, size);
+}
+
+// ── FEATURE GRAPHIC 1024×500 ─────────────────────────
+function drawFeature() {
+  const canvas = document.getElementById('featureCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = 1024, H = 500;
+
+  // Background gradient
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#020617');
+  grad.addColorStop(0.5, '#0F172A');
+  grad.addColorStop(1, '#1E293B');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 100) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 100) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // Draw Logo on the left (with nudge)
+  const logoSize = 300;
+  const nudgeX = 12;
+  ctx.drawImage(logo, 60 + nudgeX, (H - logoSize) / 2 - 20, logoSize, logoSize);
+
+  // App Name
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 80px Arial Black, Arial';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('AttendX', 400, 180);
+
+  // Tagline
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.font = '24px Arial';
+  ctx.fillText('Smart Attendance Management', 402, 240);
+
+  // Highlight footer
+  ctx.fillStyle = '#3B82F6';
+  ctx.fillRect(402, 270, 40, 3);
+  
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText('DEVELOPED BY ZENLABS', 402, 300);
+}
+</script>
+</body>
+</html>
