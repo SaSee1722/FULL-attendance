@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delete Account & Data – AttendX</title>
+  <meta name="description" content="Request deletion of your AttendX account and associated data. Submit your request here and we will process it within 30 days." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+      background: #f8f9fa;
+      color: #212529;
+      line-height: 1.7;
+    }
+    header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #fff;
+      padding: 48px 24px 40px;
+      text-align: center;
+    }
+    header .logo {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+    header .logo span { color: #e94560; }
+    header p { opacity: 0.75; font-size: 0.95rem; }
+    main {
+      max-width: 700px;
+      margin: 40px auto;
+      padding: 0 24px 64px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+      padding: 40px 48px;
+    }
+    h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; color: #1a1a2e; }
+    .subtitle { font-size: 0.95rem; color: #6c757d; margin-bottom: 32px; display: block; }
+    h2 { font-size: 1.05rem; font-weight: 700; color: #1a1a2e; margin: 28px 0 10px; }
+    p { margin-bottom: 14px; font-size: 0.97rem; }
+    ul { padding-left: 20px; margin-bottom: 14px; }
+    ul li { margin-bottom: 6px; font-size: 0.97rem; }
+    a { color: #0f3460; }
+
+    /* Steps */
+    .steps { counter-reset: step; list-style: none; padding: 0; margin: 16px 0 24px; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+    .steps li::before {
+      content: counter(step);
+      background: #0f3460;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.85rem;
+      min-width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 2px;
+    }
+    .steps li .text { font-size: 0.97rem; }
+
+    /* Email button */
+    .btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #0f3460, #16213e);
+      color: #fff;
+      text-decoration: none;
+      padding: 14px 32px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.97rem;
+      margin-top: 8px;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.85; }
+
+    /* Warning box */
+    .warn {
+      background: #fff8e1;
+      border-left: 4px solid #ffc107;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 20px 0;
+      font-size: 0.92rem;
+      color: #555;
+    }
+
+    /* Info box */
+    .info {
+      background: #e8f4fd;
+      border-left: 4px solid #0f3460;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-top: 28px;
+    }
+    .info strong { display: block; margin-bottom: 4px; color: #1a1a2e; }
+
+    /* Data table */
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.92rem; }
+    th { background: #f0f4ff; text-align: left; padding: 10px 14px; font-weight: 600; color: #1a1a2e; }
+    td { padding: 10px 14px; border-bottom: 1px solid #f1f3f5; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .tag-delete { background: #ffe0e0; color: #c0392b; }
+    .tag-keep { background: #e0ffe0; color: #27ae60; }
+
+    footer {
+      text-align: center;
+      padding: 24px;
+      font-size: 0.8rem;
+      color: #adb5bd;
+    }
+    @media (max-width: 600px) {
+      .card { padding: 24px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Attend<span>X</span></div>
+  <p>Smart Attendance Management by zenlabs</p>
+</header>
+
+<main>
+  <div class="card">
+    <h1>Account &amp; Data Deletion Request</h1>
+    <span class="subtitle">Last updated: April 24, 2026</span>
+
+    <p>You have the right to request deletion of your <strong>AttendX</strong> account and all associated personal data. Please follow the steps below to submit your request. We will process it within <strong>30 days</strong>.</p>
+
+    <h2>How to Request Deletion</h2>
+    <ol class="steps">
+      <li><div class="text">Compose an email using the button below, or manually send an email to <a href="mailto:salabadeshwaran@gmail.com">salabadeshwaran@gmail.com</a>.</div></li>
+      <li><div class="text">Use the subject line: <strong>"AttendX – Account Deletion Request"</strong>.</div></li>
+      <li><div class="text">In the body, include: your <strong>registered email address</strong> and your <strong>full name</strong> as used in the app.</div></li>
+      <li><div class="text">Send the email. You will receive a confirmation response within 5 business days, and your account and data will be fully deleted within 30 days.</div></li>
+    </ol>
+
+    <a
+      class="btn"
+      href="mailto:salabadeshwaran@gmail.com?subject=AttendX%20%E2%80%93%20Account%20Deletion%20Request&body=Hello%2C%0A%0AI%20would%20like%20to%20request%20the%20deletion%20of%20my%20AttendX%20account%20and%20all%20associated%20data.%0A%0ARegistered%20Email%3A%20%5Byour%20email%5D%0AFull%20Name%3A%20%5Byour%20name%5D%0A%0AThank%20you."
+      id="delete-request-btn"
+    >
+      ✉️ Send Deletion Request Email
+    </a>
+
+    <div class="warn">
+      ⚠️ <strong>Note:</strong> This action is permanent and cannot be undone. Once your account is deleted, your attendance records, profile, and all associated data will be permanently removed from our servers.
+    </div>
+
+    <h2>What Data Gets Deleted</h2>
+    <table>
+      <tr>
+        <th>Data Type</th>
+        <th>Action</th>
+        <th>Retention Period</th>
+      </tr>
+      <tr>
+        <td>Account credentials (email, password hash)</td>
+        <td><span class="tag tag-delete">Permanently Deleted</span></td>
+        <td>Immediately upon confirmation</td>
+      </tr>
+      <tr>
+        <td>Profile information (name, department, photo)</td>
+        <td><span class="tag tag-delete">Permanently Deleted</span></td>
+        <td>Within 30 days</td>
+      </tr>
+      <tr>
+        <td>Attendance records associated with your account</td>
+        <td><span class="tag tag-delete">Permanently Deleted</span></td>
+        <td>Within 30 days</td>
+      </tr>
+      <tr>
+        <td>Anonymized / aggregated analytics data</td>
+        <td><span class="tag tag-keep">May Be Retained</span></td>
+        <td>Retained (cannot be linked back to you)</td>
+      </tr>
+    </table>
+
+    <h2>Partial Data Deletion (Optional)</h2>
+    <p>If you wish to delete only specific data (e.g., profile picture or attendance history) without deleting your entire account, you can specify that in your email request. We will honor reasonable partial deletion requests.</p>
+
+    <div class="info">
+      <strong>Questions or Concerns?</strong>
+      If you have any questions about this process or our data practices, please review our
+      <a href="./privacy-policy.html">Privacy Policy</a> or contact us at
+      <a href="mailto:salabadeshwaran@gmail.com">salabadeshwaran@gmail.com</a>.
+    </div>
+  </div>
+</main>
+
+<footer>
+  &copy; 2026 zenlabs &mdash; AttendX. All rights reserved. |
+  <a href="./privacy-policy.html">Privacy Policy</a>
+</footer>
+
+</body>
+</html>
