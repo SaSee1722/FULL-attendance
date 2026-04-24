@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download Play Store Screenshots – AttendX</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #111; color: #fff; padding: 32px; text-align: center; }
+    h1 { margin-bottom: 8px; }
+    p { opacity: 0.6; margin-bottom: 32px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; max-width: 1200px; margin: 0 auto; }
+    .section { background: #1a1a2e; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; }
+    h2 { margin-bottom: 16px; font-size: 1rem; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+    .preview-box { width: 180px; height: 320px; background: #0f0f1b; border: 2px dashed #444; border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; margin-bottom: 16px; }
+    .preview-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    canvas { display: none; }
+    .btn {
+      display: inline-block; background: #3B82F6; color: white;
+      padding: 10px 20px; border-radius: 8px; text-decoration: none;
+      font-weight: bold; cursor: pointer; border: none; font-size: 0.9rem; margin-top: 8px; width: 100%;
+    }
+    .btn.download { background: #e94560; }
+    .btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+    .btn:hover:not([disabled]) { opacity: 0.9; }
+    input[type="file"] { display: none; }
+    .upload-label { cursor: pointer; color: #3B82F6; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<h1>📱 AttendX Screenshot Generator</h1>
+<p>Upload your screenshots below. They will be resized to <b>1080 × 1920 (9:16)</b> for Google Play.</p>
+
+<div class="grid">
+  <!-- SLOT 1 -->
+  <div class="section">
+    <h2>Screenshot 1</h2>
+    <div class="preview-box" id="preview1">
+      <span class="upload-label" onclick="document.getElementById('file1').click()">+ Click to Upload</span>
+    </div>
+    <input type="file" id="file1" accept="image/*" onchange="handleFile(this, 1)">
+    <button class="btn download" id="dl1" disabled onclick="downloadImage(1)">⬇ Download PNG</button>
+  </div>
+
+  <!-- SLOT 2 -->
+  <div class="section">
+    <h2>Screenshot 2</h2>
+    <div class="preview-box" id="preview2">
+      <span class="upload-label" onclick="document.getElementById('file2').click()">+ Click to Upload</span>
+    </div>
+    <input type="file" id="file2" accept="image/*" onchange="handleFile(this, 2)">
+    <button class="btn download" id="dl2" disabled onclick="downloadImage(2)">⬇ Download PNG</button>
+  </div>
+
+  <!-- SLOT 3 -->
+  <div class="section">
+    <h2>Screenshot 3</h2>
+    <div class="preview-box" id="preview3">
+      <span class="upload-label" onclick="document.getElementById('file3').click()">+ Click to Upload</span>
+    </div>
+    <input type="file" id="file3" accept="image/*" onchange="handleFile(this, 3)">
+    <button class="btn download" id="dl3" disabled onclick="downloadImage(3)">⬇ Download PNG</button>
+  </div>
+
+  <!-- SLOT 4 -->
+  <div class="section">
+    <h2>Screenshot 4</h2>
+    <div class="preview-box" id="preview4">
+      <span class="upload-label" onclick="document.getElementById('file4').click()">+ Click to Upload</span>
+    </div>
+    <input type="file" id="file4" accept="image/*" onchange="handleFile(this, 4)">
+    <button class="btn download" id="dl4" disabled onclick="downloadImage(4)">⬇ Download PNG</button>
+  </div>
+</div>
+
+<canvas id="exportCanvas" width="1080" height="1920"></canvas>
+
+<script>
+  const images = {};
+
+  function handleFile(input, id) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        images[id] = img;
+        const preview = document.getElementById('preview' + id);
+        preview.innerHTML = '';
+        const previewImg = new Image();
+        previewImg.src = img.src;
+        previewImg.style.maxWidth = '100%';
+        previewImg.style.maxHeight = '100%';
+        preview.appendChild(previewImg);
+        document.getElementById('dl' + id).disabled = false;
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function downloadImage(id) {
+    const img = images[id];
+    if (!img) return;
+
+    const canvas = document.getElementById('exportCanvas');
+    const ctx = canvas.getContext('2d');
+    const targetW = 1080;
+    const targetH = 1920;
+
+    // Clear and fill background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, targetW, targetH);
+
+    // Maintain aspect ratio while filling the canvas
+    const scale = Math.max(targetW / img.width, targetH / img.height);
+    const x = (targetW / 2) - (img.width / 2) * scale;
+    const y = (targetH / 2) - (img.height / 2) * scale;
+
+    ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+
+    // Trigger download
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = `attendx-screenshot-${id}.png`;
+      link.href = url;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    }, 'image/png');
+  }
+</script>
+</body>
+</html>
